@@ -4,13 +4,6 @@ import { loadConfig, resetConfig } from './ConfigLoader';
 import { createPatternFormatter } from '../formatters/PatternFormatter';
 import { LogFormat, Config, LogLevel } from '../types';
 
-const LEVELS: Record<LogLevel, number> = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  debug: 3,
-};
-
 const container = new winston.Container();
 
 const createTransports = (config: Config['root'], name: string) => {

@@ -8,10 +8,14 @@ const PLACEHOLDERS = {
   name: (info: winston.Logform.TransformableInfo) => info.label || '',
   message: (info: winston.Logform.TransformableInfo) => info.message as string,
   meta: (info: winston.Logform.TransformableInfo) => {
-    const meta = Object.keys(info)
-      .filter(key => !['timestamp', 'level', 'message', 'label'].includes(key))
-      .reduce((obj, key) => ({ ...obj, [key]: info[key] }), {});
-    return Object.keys(meta).length ? JSON.stringify(meta) : '';
+    const meta: Record<string, unknown> = {};
+    for (const key of Object.keys(info)) {
+      if (!['timestamp', 'level', 'message', 'label'].includes(key)) {
+        meta[key] = info[key];
+      }
+    }
+    const metaStr = JSON.stringify(meta);
+    return metaStr === '{}' ? '' : metaStr;
   },
   log_position: () => getLogPosition(),
 };
@@ -22,7 +26,7 @@ export const createPatternFormatter = (pattern: string): winston.Logform.Format 
     for (const [key, resolver] of Object.entries(PLACEHOLDERS)) {
       const placeholder = `%{${key}}`;
       if (result.includes(placeholder)) {
-        result = result.replace(placeholder, resolver(info)?.toString() || '');
+        result = result.replaceAll(placeholder, resolver(info)?.toString() || '');
       }
     }
     return result;
