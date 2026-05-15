@@ -1,6 +1,6 @@
 {
     "name": "@bics/logger",
-    "version": "0.0.0",
+    "version": "0.0.1",
     "description": "Logger utility for bics-commons",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
