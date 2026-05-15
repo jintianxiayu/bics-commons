@@ -6,7 +6,7 @@
     "types": "dist/index.d.ts",
     "scripts": {
         "build": "tsc",
-        "test": "echo \"Tests not implemented\" && exit 0",
+        "test": "jest",
         "clean": "rm -rf dist"
     },
     "files": [
@@ -19,7 +19,10 @@
         "yaml": "^2.8.0"
     },
     "devDependencies": {
+        "@types/jest": "^30.0.0",
         "@types/node": "^25.8.0",
-        "@types/yaml": "^1.9.6"
+        "@types/yaml": "^1.9.6",
+        "jest": "^30.4.2",
+        "ts-jest": "^29.4.9"
     }
 }
