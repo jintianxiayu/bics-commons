@@ -13,6 +13,7 @@
         "dist"
     ],
     "dependencies": {
-        "stacktrace-parser": "^0.1.11"
+        "stacktrace-parser": "^0.1.11",
+        "yaml": "^2.8.0"
     }
 }
