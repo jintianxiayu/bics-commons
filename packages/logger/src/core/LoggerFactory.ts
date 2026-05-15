@@ -6,6 +6,9 @@ import { LogFormat, Config, LogLevel } from '../types';
 
 const container = new winston.Container();
 
+/**
+ * 根据配置创建 Winston transport 数组
+ */
 const createTransports = (config: Config['root'], name: string) => {
   const transports: winston.transport[] = [];
 
@@ -52,6 +55,10 @@ const createTransports = (config: Config['root'], name: string) => {
   return transports;
 };
 
+/**
+ * 根据 root 配置和命名 logger 配置创建 logger 选项
+ * 命名 logger 未配置的项继承 root，已配置则覆盖
+ */
 const createLoggerConfig = (config: Config['root'], loggerConfig: Config['loggers'][string]) => {
   const level = loggerConfig.level || config.level;
   const format = loggerConfig.format || config.format;
@@ -77,7 +84,15 @@ const createLoggerConfig = (config: Config['root'], loggerConfig: Config['logger
   };
 };
 
+/**
+ * 日志工厂，提供命名 logger 获取和配置管理
+ */
 export const LoggerFactory = {
+  /**
+   * 获取命名 logger
+   * @param name - logger 名称，匹配 YAML 配置中的 loggers 项
+   * @returns Winston Logger 实例
+   */
   getLogger(name: string): winston.Logger {
     const config = loadConfig(process.env.LOGGER_CONFIG_PATH);
 
@@ -110,6 +125,10 @@ export const LoggerFactory = {
     return logger;
   },
 
+  /**
+   * 重置日志工厂，清除配置缓存并关闭所有 logger
+   * 用于测试或需要重新加载配置的场景
+   */
   reset(): void {
     resetConfig();
     // 清除所有 logger

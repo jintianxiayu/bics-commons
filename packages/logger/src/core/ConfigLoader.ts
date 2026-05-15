@@ -1,17 +1,22 @@
 import fs from 'fs';
-import path from 'path';
 import YAML from 'yaml';
 import { Config, LogLevel } from '../types';
 import { defaultConfig } from '../config/defaultConfig';
 
 let cachedConfig: Config | null = null;
 
+/**
+ * 解析布尔值配置，支持 boolean 和字符串形式
+ */
 const parseBoolean = (value: unknown): boolean => {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value === 'true' || value === '1';
   return false;
 };
 
+/**
+ * 解析 YAML 配置为 Config 对象
+ */
 const parseConfig = (data: unknown): Config => {
   const config = data as Record<string, unknown>;
 
@@ -48,6 +53,11 @@ const parseConfig = (data: unknown): Config => {
   };
 };
 
+/**
+ * 加载日志配置
+ * @param configPath - YAML 配置文件路径，未提供则使用内置默认配置
+ * @returns 解析后的 Config 对象，结果会被缓存
+ */
 export const loadConfig = (configPath?: string): Config => {
   if (cachedConfig) return cachedConfig;
 
@@ -67,6 +77,9 @@ export const loadConfig = (configPath?: string): Config => {
   return cachedConfig;
 };
 
+/**
+ * 重置配置缓存，用于测试或配置热更新
+ */
 export const resetConfig = (): void => {
   cachedConfig = null;
 };

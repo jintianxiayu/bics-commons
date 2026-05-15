@@ -1,7 +1,10 @@
 import winston from 'winston';
-import { LogMessage } from '../types';
 import { getLogPosition } from '../core/LogPosition';
 
+/**
+ * Pattern 占位符解析器映射
+ * 每个占位符对应一个函数，接收 winston info 对象并返回替换值
+ */
 const PLACEHOLDERS = {
   timestamp: (info: winston.Logform.TransformableInfo) => info.timestamp as string,
   level: (info: winston.Logform.TransformableInfo) => info.level.toUpperCase(),
@@ -20,6 +23,10 @@ const PLACEHOLDERS = {
   log_position: () => getLogPosition(),
 };
 
+/**
+ * 创建基于 pattern 的格式化器
+ * @param pattern - 格式化模板，支持 %{timestamp}, %{level}, %{name}, %{message}, %{meta}, %{log_position}
+ */
 export const createPatternFormatter = (pattern: string): winston.Logform.Format => {
   return winston.format.printf(info => {
     let result = pattern;

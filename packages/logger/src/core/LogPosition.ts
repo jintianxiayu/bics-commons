@@ -1,5 +1,9 @@
 import stackTrace from 'stacktrace-parser';
 
+/**
+ * 获取日志调用位置（源码文件名:行号:列号）
+ * 通过解析调用栈获取实际调用位置，跳过 logger 内部帧
+ */
 export const getLogPosition = (): string => {
   const stack = stackTrace.parse(new Error().stack!);
   // stack[0] = Error
