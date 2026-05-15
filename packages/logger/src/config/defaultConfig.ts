@@ -1,8 +1,8 @@
-import { Config } from '../types';
+import { Config, LogLevel } from '../types';
 
 export const defaultConfig: Config = {
   root: {
-    level: 'info',
+    level: LogLevel.INFO,
     format: 'plain',
     pattern: '%{timestamp} %{level} %{name} %{log_position}: %{message}',
     console: {

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import YAML from 'yaml';
-import { Config } from '../types';
+import { Config, LogLevel } from '../types';
 import { defaultConfig } from '../config/defaultConfig';
 
 let cachedConfig: Config | null = null;
@@ -33,7 +33,7 @@ const parseConfig = (data: unknown): Config => {
 
   return {
     root: {
-      level: (root.level as string) || defaultConfig.root.level,
+      level: (root.level as LogLevel) || defaultConfig.root.level,
       format: (root.format as 'plain' | 'json') || defaultConfig.root.format,
       pattern: (root.pattern as string) || defaultConfig.root.pattern,
       console: {

@@ -22,7 +22,7 @@ export const createPatternFormatter = (pattern: string): winston.Logform.Format 
     for (const [key, resolver] of Object.entries(PLACEHOLDERS)) {
       const placeholder = `%{${key}}`;
       if (result.includes(placeholder)) {
-        result = result.replace(placeholder, resolver(info) || '');
+        result = result.replace(placeholder, resolver(info)?.toString() || '');
       }
     }
     return result;
