@@ -1,0 +1,15 @@
+{
+    "name": "@bics/logger",
+    "version": "0.0.0",
+    "description": "Logger utility for bics-commons",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "test": "echo \"Tests not implemented\" && exit 0",
+        "clean": "rm -rf dist"
+    },
+    "files": [
+        "dist"
+    ]
+}
