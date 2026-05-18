@@ -7,6 +7,7 @@ SLF4J 风格的日志工厂，基于 Winston 实现。
 - **命名 Logger**: 通过 `LoggerFactory.getLogger(name)` 获取
 - **YAML 配置**: 支持通过 `LOGGER_CONFIG_PATH` 环境变量指定配置文件
 - **配置继承**: 命名 Logger 未配置的选项继承 root 配置
+- **敏感信息脱敏**: 自动对日志中的敏感字段进行脱敏处理
 - **LogPosition**: `%{log_position}` 占位符自动捕获调用位置
 - **TraceContext**: `%{traceId}` 占位符支持异步上下文传递
 - **优雅关闭**: 支持 `shutdown()` 和 `setupShutdownHandlers()`
@@ -22,13 +23,31 @@ npm install @bics/logger
 ```typescript
 import { LoggerFactory } from '@bics/logger';
 
-// 获取 logger（首次调用时懒加载配置）
-const logger = LoggerFactory.getLogger('database');
+const logger = LoggerFactory.getLogger('app');
 
 // 记录日志
-logger.info('connection opened');
-logger.debug('query executed', { duration: 42 });
-logger.error('connection failed', new Error('timeout'));
+logger.info('app started', { version: '1.0.0' });
+
+// 敏感字段自动脱敏
+logger.info('user logged in', {
+  userId: 'u123',
+  email: 'user@example.com',
+  password: 'secret123'  // 自动脱敏为 ********
+});
+```
+
+## 示例代码
+
+完整示例见 `examples/demo.ts`，包含：
+- 基本日志记录
+- traceId 追踪功能
+- 敏感信息脱敏
+- 多 Logger 命名空间
+- 优雅关闭
+
+运行示例：
+```bash
+npx ts-node examples/demo.ts
 ```
 
 ## 配置
@@ -124,7 +143,7 @@ interface LoggerInterface {
 ## 类型导出
 
 ```typescript
-import { LoggerFactory, ConfigLoader, LogPosition, LoggerContext } from '@bics/logger';
+import { LoggerFactory, ConfigLoader, LogPosition, LoggerContext, SensitiveMasker } from '@bics/logger';
 import type {
   LoggerConfig,
   LoggerOptions,
@@ -133,6 +152,8 @@ import type {
   FileConfig,
   ShutdownOptions,
   LoggerInterface,
+  SensitiveFieldConfig,
+  SensitiveMaskingConfig,
 } from '@bics/logger';
 ```
 
@@ -152,6 +173,60 @@ root:
     datePattern: 'YYYY-MM-DD'
     maxSize: 10m
     maxFiles: 7d
+```
+
+## 敏感信息脱敏
+
+自动识别并脱敏日志中的敏感字段，防止密码、信用卡、手机号等信息泄露。
+
+### 默认脱敏字段
+
+| 字段 | 脱敏模板 | 示例 |
+|------|----------|------|
+| `password`, `passwd`, `pwd` | `********` | `secret123` → `********` |
+| `token`, `apiKey`, `api_key`, `secretKey` | `********` | `tk_abc` → `********` |
+| `accessToken`, `refreshToken` | `********` | `eyJhbGci` → `********` |
+| `phone`, `mobile`, `mobileNo` | `*** *** {last4}` | `13812345678` → `*** *** 5678` |
+| `creditCard`, `cardNo`, `bankAccount` | `**** **** **** {last4}` | `4111111111111111` → `**** **** **** 1111` |
+| `idCard`, `idNumber` | `**************{last4}` | `110101199001011234` → `**************1234` |
+| `email` | `{first2}***@{domain}` | `user@example.com` → `us***@example.com` |
+
+### 脱敏模板语法
+
+| 模板 | 说明 | 示例 |
+|------|------|------|
+| `{firstN}` | 保留前 N 个字符 | `{first2}`: `abc` → `ab*` |
+| `{lastN}` | 保留后 N 个字符 | `{last4}`: `123456` → `**3456` |
+| `{domain}` | 邮箱域名部分 | `@example.com` |
+| `*` | 单个星号保持不变 | `********` |
+
+### 使用示例
+
+```typescript
+const logger = LoggerFactory.getLogger('security');
+
+// 敏感字段自动脱敏
+logger.info('用户登录', {
+  userId: 'u12345',
+  email: 'user@example.com',
+  password: 'secret123',        // → ********
+  creditCard: '4111111111111111' // → **** **** **** 1111
+});
+```
+
+### 配合 HTTP 中间件使用
+
+```typescript
+app.use((req, res, next) => {
+  // 请求日志自动脱敏
+  logger.info('received request', {
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+    auth: req.headers.authorization  // → ********
+  });
+  next();
+});
 ```
 
 ## TraceContext - traceId 追踪

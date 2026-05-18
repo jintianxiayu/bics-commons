@@ -1,22 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(openspec new *)",
-      "Bash(openspec status *)",
-      "Bash(openspec instructions *)",
-      "Bash(openspec complete *)",
-      "Bash(openspec --help)",
-      "Bash(openspec change *)",
-      "Bash(openspec list *)",
+      "Bash(npm --version)",
+      "Bash(git init *)",
+      "Bash(npx lerna *)",
       "Bash(npm install *)",
-      "Bash(npx tsc *)",
-      "Bash(npm test *)",
-      "Bash(node -e ' *)",
-      "Bash(node *)",
-      "Bash(npx jest *)",
-      "Bash(npx ts-node *)",
+      "Bash(npm run *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "mcp__MiniMax__web_search",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npx tsc *)",
+      "Bash(npm show *)",
+      "Bash(npm test *)",
+      "Bash(npx eslint *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)"
     ]
   }
 }
