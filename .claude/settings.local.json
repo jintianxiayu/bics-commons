@@ -10,7 +10,9 @@
       "Bash(openspec list *)",
       "Bash(npm install *)",
       "Bash(npx tsc *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(node -e ' *)",
+      "Bash(node *)"
     ]
   }
 }
