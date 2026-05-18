@@ -1,85 +1,185 @@
-import fs from 'fs';
-import YAML from 'yaml';
-import { Config, LogLevel } from '../types';
-import { defaultConfig } from '../config/defaultConfig';
+/**
+ * 配置加载器
+ *
+ * 负责从 YAML 文件加载配置，支持递归合并和配置校验
+ */
 
-let cachedConfig: Config | null = null;
+import { readFileSync } from 'fs';
+import { parse as yamlParse } from 'yaml';
+import { getDefaultConfig } from '../config/defaultConfig';
+import type { LoggerConfig, LoggerOptions } from '../types';
+
+const CONFIG_ENV_KEY = 'LOGGER_CONFIG_PATH';
+const DEFAULT_CONFIG_PATH = './logger.yaml';
+
+interface ParsedConfig {
+  root?: Partial<LoggerConfig>;
+  loggers?: Record<string, Partial<LoggerConfig>>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 /**
- * 解析布尔值配置，支持 boolean 和字符串形式
+ * 递归合并配置（JSON Merge Patch 风格）
  */
-const parseBoolean = (value: unknown): boolean => {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value === 'true' || value === '1';
-  return false;
-};
-
-/**
- * 解析 YAML 配置为 Config 对象
- */
-const parseConfig = (data: unknown): Config => {
-  const config = data as Record<string, unknown>;
-
-  const root = config.root as Record<string, unknown> || {};
-  const loggers = (config.loggers as Record<string, Record<string, unknown>>) || {};
-
-  const parseFileConfig = (file: unknown): typeof defaultConfig.root.file => {
-    if (!file || typeof file !== 'object') return defaultConfig.root.file;
-    const f = file as Record<string, unknown>;
-    return {
-      enabled: parseBoolean(f.enabled),
-      dirname: (f.dirname as string) || './logs',
-      filename: (f.filename as string) || 'app.log',
-      datePattern: (f.datePattern as string) || 'YYYY-MM-DD',
-      maxSize: (f.maxSize as string) || '10m',
-      maxFiles: (f.maxFiles as string) || '7d',
-    };
-  };
-
-  return {
-    root: {
-      level: (root.level as LogLevel) || defaultConfig.root.level,
-      format: (root.format as 'plain' | 'json') || defaultConfig.root.format,
-      pattern: (root.pattern as string) || defaultConfig.root.pattern,
-      console: {
-        enabled: parseBoolean(root.console && (root.console as Record<string, unknown>).enabled),
-      },
-      file: parseFileConfig(root.file),
-    },
-    loggers: Object.entries(loggers).reduce((acc, [name, loggerConfig]) => {
-      acc[name] = { name, ...loggerConfig } as typeof defaultConfig.loggers[string];
-      return acc;
-    }, {} as Record<string, typeof defaultConfig.loggers[string]>),
-  };
-};
-
-/**
- * 加载日志配置
- * @param configPath - YAML 配置文件路径，未提供则使用内置默认配置
- * @returns 解析后的 Config 对象，结果会被缓存
- */
-export const loadConfig = (configPath?: string): Config => {
-  if (cachedConfig) return cachedConfig;
-
-  if (!configPath) {
-    cachedConfig = defaultConfig;
-    return cachedConfig;
+function mergeConfig(target: Partial<LoggerConfig>, source: Partial<LoggerConfig>): Partial<LoggerConfig> {
+  if (!isObject(target) || !isObject(source)) {
+    return source;
   }
 
-  if (!fs.existsSync(configPath)) {
-    cachedConfig = defaultConfig;
-    return cachedConfig;
+  const result: Record<string, unknown> = { ...target };
+
+  for (const key of Object.keys(source)) {
+    const targetValue = (target as Record<string, unknown>)[key];
+    const sourceValue = (source as Record<string, unknown>)[key];
+
+    if (isObject(targetValue) && isObject(sourceValue)) {
+      result[key] = mergeConfig(targetValue as Partial<LoggerConfig>, sourceValue as Partial<LoggerConfig>);
+    } else {
+      result[key] = sourceValue;
+    }
   }
 
-  const fileContent = fs.readFileSync(configPath, 'utf-8');
-  const parsed = YAML.parse(fileContent);
-  cachedConfig = parseConfig(parsed);
-  return cachedConfig;
-};
+  return result as Partial<LoggerConfig>;
+}
+
+function validateConfigValue(value: unknown, path: string): void {
+  if (value === undefined) return;
+
+  if (path === 'root.level' || path === 'loggers.*.level') {
+    if (typeof value !== 'string' || !['debug', 'info', 'warn', 'error'].includes(value)) {
+      throw new Error(`Invalid log level at ${path}: ${value}`);
+    }
+  }
+
+  if (isObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      validateConfigValue(v, `${path}.${k}`);
+    }
+  }
+}
+
+class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
 
 /**
- * 重置配置缓存，用于测试或配置热更新
+ * 加载并解析 YAML 配置文件
  */
-export const resetConfig = (): void => {
-  cachedConfig = null;
-};
+function loadYamlFile(filePath: string): Partial<ParsedConfig> {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    return yamlParse(content) as Partial<ParsedConfig>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new ConfigError(`Config file not found: ${filePath}`);
+    }
+    if (error instanceof Error && error.name === 'YAMLParseError') {
+      throw new ConfigError(`Invalid YAML: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * 校验配置结构
+ */
+function validateConfig(config: Partial<ParsedConfig>): void {
+  if (!config) {
+    throw new ConfigError('Config is empty');
+  }
+
+  if (config.root) {
+    validateConfigValue(config.root, 'root');
+  }
+
+  if (config.loggers) {
+    for (const [name, loggerConfig] of Object.entries(config.loggers)) {
+      if (typeof name !== 'string') {
+        throw new ConfigError('Logger name must be a string');
+      }
+      if (loggerConfig) {
+        validateConfigValue(loggerConfig, `loggers.${name}`);
+      }
+    }
+  }
+}
+
+export class ConfigLoader {
+  private static config: LoggerConfig | null = null;
+  private static loggerConfigs: Map<string, LoggerConfig> = new Map();
+
+  /**
+   * 获取配置文件路径
+   */
+  static getConfigPath(): string {
+    return process.env[CONFIG_ENV_KEY] || DEFAULT_CONFIG_PATH;
+  }
+
+  /**
+   * 加载并校验配置
+   */
+  static load(configPath?: string): LoggerConfig {
+    const path = configPath || this.getConfigPath();
+
+    const parsed = loadYamlFile(path);
+    validateConfig(parsed);
+
+    const rootConfig = mergeConfig(getDefaultConfig(), parsed.root || {});
+
+    this.config = rootConfig;
+    this.loggerConfigs.clear();
+
+    if (parsed.loggers) {
+      for (const [name, loggerPartial] of Object.entries(parsed.loggers)) {
+        const merged = mergeConfig(rootConfig, loggerPartial);
+        this.loggerConfigs.set(name, merged as LoggerConfig);
+      }
+    }
+
+    return this.config;
+  }
+
+  /**
+   * 获取已缓存的配置
+   */
+  static getConfig(): LoggerConfig | null {
+    return this.config;
+  }
+
+  /**
+   * 获取命名 Logger 的配置（已合并 root 配置）
+   */
+  static getLoggerConfig(name: string): LoggerConfig | null {
+    return this.loggerConfigs.get(name) || null;
+  }
+
+  /**
+   * 获取所有已注册的 Logger 名称
+   */
+  static getLoggerNames(): string[] {
+    return Array.from(this.loggerConfigs.keys());
+  }
+
+  /**
+   * 清除缓存的配置（用于测试）
+   */
+  static reset(): void {
+    this.config = null;
+    this.loggerConfigs.clear();
+  }
+
+  /**
+   * 获取默认配置
+   */
+  static getDefaultConfig(): LoggerConfig {
+    return getDefaultConfig();
+  }
+
+  static ConfigError = ConfigError;
+}

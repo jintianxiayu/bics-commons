@@ -1,57 +1,63 @@
 /**
- * 日志级别枚举，对应 Winston 的标准日志级别
+ * Logger 包类型定义
+ *
+ * 定义 LoggerFactory 所需的配置、选项和接口类型
  */
-export enum LogLevel {
-  DEBUG = 'debug',
-  INFO = 'info',
-  WARN = 'warn',
-  ERROR = 'error',
-}
 
-/** 日志输出格式：plain 为格式化文本，json 为 JSON 序列化 */
-export type LogFormat = 'plain' | 'json';
+export type LogLevelName = 'debug' | 'info' | 'warn' | 'error';
 
-/** 控制台输出配置 */
 export interface ConsoleConfig {
   enabled: boolean;
+  colors?: boolean;
+  format?: 'plain' | 'json';
 }
 
-/** 文件输出配置，支持按天轮转 */
 export interface FileConfig {
   enabled: boolean;
   dirname?: string;
   filename?: string;
   datePattern?: string;
   maxSize?: string;
-  maxFiles?: string | number;
+  maxFiles?: string;
 }
 
-/** 根日志配置，所有命名 logger 的默认继承来源 */
-export interface RootConfig {
-  level: LogLevel;
-  format: LogFormat;
-  pattern: string;
-  console: ConsoleConfig;
-  file: FileConfig;
+export interface SensitiveFieldConfig {
+  field: string;
+  mask: string;
 }
 
-/** 命名日志配置，可覆盖 root 的任意配置项 */
-export interface LoggerConfig extends Partial<RootConfig> {
+export interface SensitiveMaskingConfig {
+  enabled?: boolean;
+  fields?: SensitiveFieldConfig[];
+}
+
+export interface LoggerConfig {
+  level?: LogLevelName;
+  console?: ConsoleConfig;
+  file?: FileConfig;
+  pattern?: string;
+  sensitiveMasking?: SensitiveMaskingConfig;
+}
+
+export interface LoggerOptions {
   name: string;
+  level?: LogLevelName;
+  console?: ConsoleConfig;
+  file?: FileConfig;
+  pattern?: string;
 }
 
-/** 完整的日志配置结构，包含 root 配置和所有命名 logger */
-export interface Config {
-  root: RootConfig;
-  loggers: Record<string, LoggerConfig>;
+export interface ShutdownOptions {
+  timeout?: number;
+  onShutdown?: () => void;
+  signals?: string[];
 }
 
-/** 日志消息结构，用于 JSON 格式输出 */
-export interface LogMessage {
-  timestamp: string;
-  level: string;
-  name: string;
-  message: string;
-  meta?: unknown[];
-  log_position?: string;
+export interface LoggerInterface {
+  debug(message: string, ...meta: unknown[]): void;
+  info(message: string, ...meta: unknown[]): void;
+  warn(message: string, ...meta: unknown[]): void;
+  error(message: string, ...meta: unknown[]): void;
 }
+
+export { LogLevelName as Level };
