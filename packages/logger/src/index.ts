@@ -1,55 +1,60 @@
-export enum LogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARN = 2,
-    ERROR = 3,
-}
+/**
+ * @bics/logger - SLF4J 风格的日志工厂
+ *
+ * 基于 Winston 的生产级日志库，支持：
+ * - YAML 配置文件
+ * - 命名 Logger
+ * - 配置继承
+ * - %{log_position} 占位符自动捕获调用位置
+ * - 优雅关闭
+ *
+ * @example
+ * ```typescript
+ * import { LoggerFactory } from '@bics/logger';
+ *
+ * const logger = LoggerFactory.getLogger('database');
+ * logger.info('connection opened');
+ * ```
+ */
 
-export interface LoggerOptions {
-    level?: LogLevel;
-    prefix?: string;
-}
+import { LoggerFactory } from './core/LoggerFactory';
+import { ConfigLoader } from './core/ConfigLoader';
+import { LogPosition } from './core/LogPosition';
+import type {
+  LoggerOptions,
+  LoggerConfig,
+  LogLevelName,
+  ConsoleConfig,
+  FileConfig,
+  ShutdownOptions,
+} from './types';
 
-export class Logger {
-    private level: LogLevel;
-    private prefix: string;
+/**
+ * 导出 LoggerFactory、ConfigLoader、LogPosition
+ */
+export { LoggerFactory, ConfigLoader, LogPosition };
 
-    constructor(options: LoggerOptions = {}) {
-        this.level = options.level ?? LogLevel.INFO;
-        this.prefix = options.prefix ?? '';
-    }
+/**
+ * 导出类型定义
+ */
+export type {
+  LoggerOptions,
+  LoggerConfig,
+  LogLevelName,
+  ConsoleConfig,
+  FileConfig,
+  ShutdownOptions,
+};
 
-    debug(message: string, ...args: unknown[]): void {
-        this.log(LogLevel.DEBUG, message, args);
-    }
-
-    info(message: string, ...args: unknown[]): void {
-        this.log(LogLevel.INFO, message, args);
-    }
-
-    warn(message: string, ...args: unknown[]): void {
-        this.log(LogLevel.WARN, message, args);
-    }
-
-    error(message: string, ...args: unknown[]): void {
-        this.log(LogLevel.ERROR, message, args);
-    }
-
-    private log(level: LogLevel, message: string, args: unknown[]): void {
-        if (level < this.level) return;
-
-        const timestamp = new Date().toISOString();
-        const levelName = LogLevel[level];
-        const prefix = this.prefix ? `[${this.prefix}] ` : '';
-
-        console.log(`${timestamp} ${levelName}: ${prefix}${message}`, ...args);
-    }
-
-    setLevel(level: LogLevel): void {
-        this.level = level;
-    }
-}
-
-export function createLogger(options?: LoggerOptions): Logger {
-    return new Logger(options);
+/**
+ * 创建 Logger 实例（已弃用，请使用 LoggerFactory.getLogger）
+ *
+ * @deprecated 使用 LoggerFactory.getLogger(name) 替代
+ * @param options - 可选配置项
+ * @param options.name - Logger 名称，默认为 'default'
+ * @returns Logger 实例
+ */
+export function createLogger(options?: { name?: string }): ReturnType<typeof LoggerFactory.getLogger> {
+  const name = options?.name || 'default';
+  return LoggerFactory.getLogger(name);
 }
