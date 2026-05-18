@@ -20,6 +20,7 @@
 import { LoggerFactory } from './core/LoggerFactory';
 import { ConfigLoader } from './core/ConfigLoader';
 import { LogPosition } from './core/LogPosition';
+import { LoggerContext } from './core/LoggerContext';
 import type {
   LoggerOptions,
   LoggerConfig,
@@ -30,9 +31,9 @@ import type {
 } from './types';
 
 /**
- * 导出 LoggerFactory、ConfigLoader、LogPosition
+ * 导出 LoggerFactory、ConfigLoader、LogPosition、LoggerContext
  */
-export { LoggerFactory, ConfigLoader, LogPosition };
+export { LoggerFactory, ConfigLoader, LogPosition, LoggerContext };
 
 /**
  * 导出类型定义

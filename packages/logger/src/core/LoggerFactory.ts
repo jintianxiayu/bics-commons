@@ -9,6 +9,7 @@ import * as winston from 'winston';
 const DailyRotateFile = require('winston-daily-rotate-file');
 import { ConfigLoader } from './ConfigLoader';
 import { LogPosition } from './LogPosition';
+import { LoggerContext } from './LoggerContext';
 import { getDefaultConfig, DEFAULT_PATTERN } from '../config/defaultConfig';
 import type { LoggerConfig, ShutdownOptions, LogLevelName } from '../types';
 
@@ -49,6 +50,11 @@ function createFormat(pattern: string): winston.Logform.Format {
 
     if (pattern.includes('%{log_position}')) {
       replacements['%{log_position}'] = LogPosition.capture();
+    }
+
+    if (pattern.includes('%{traceId}')) {
+      const store = LoggerContext.getStore();
+      replacements['%{traceId}'] = store?.get('traceId') ?? '-';
     }
 
     for (const [key, value] of Object.entries(replacements)) {

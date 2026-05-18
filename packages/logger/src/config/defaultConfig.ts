@@ -6,7 +6,7 @@
 
 import type { LoggerConfig } from '../types';
 
-export const DEFAULT_PATTERN = '%{timestamp} %{level} [%{name}] %{log_position}: %{message} %{meta}';
+export const DEFAULT_PATTERN = '%{timestamp} %{level} [%{name}] [%{traceId}] %{log_position}: %{message} %{meta}';
 
 export const DEFAULT_LOG_LEVEL: 'info' = 'info';
 
