@@ -15,11 +15,9 @@ interface StackFrame {
 }
 
 const EXCLUDE_PATTERNS: RegExp[] = [
-  /node_modules\/@bics\/logger/,
-  /node_modules\/winston/,
-  /node_modules\/stacktrace-parser/,
-  /node_modules\/winston-daily-rotate-file/,
-  /node:internal/,
+  /\/packages\/logger\/src\//,
+  /\/node_modules\//,
+  /node:/,
 ];
 
 const EXCLUDE_METHOD_PREFIXES: string[] = [
@@ -29,13 +27,13 @@ const EXCLUDE_METHOD_PREFIXES: string[] = [
   'PatternFormatter.',
   'Transport.',
   'ConfigLoader.',
-  'Object.',
-  'Function.',
 ];
 
 export class LogPosition {
   private static isInternalFrame(frame: StackFrame): boolean {
-    const fileName = frame.fileName || '';
+    let fileName = frame.fileName || '';
+    // Normalize Windows backslashes to forward slashes for consistent pattern matching
+    fileName = fileName.replace(/\\/g, '/');
 
     for (const pattern of EXCLUDE_PATTERNS) {
       if (pattern.test(fileName)) {
@@ -63,10 +61,13 @@ export class LogPosition {
    * 从当前调用栈中找到第一个业务代码帧，返回 "file:line:column" 格式的字符串
    */
   static capture(): string {
+    const originalLimit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 200;
     const error = new Error();
+    Error.stackTraceLimit = originalLimit;
     const stack = StackTraceParser.parse(error.stack || '');
 
-    for (let i = 0; i < stack.length; i++) {
+    for (let i = 1; i < stack.length; i++) {
       const rawFrame = stack[i];
       const frame: StackFrame = {
         fileName: rawFrame.file || '',
