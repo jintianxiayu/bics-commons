@@ -21,11 +21,22 @@ export interface FileConfig {
   maxFiles?: string;
 }
 
+export interface SensitiveFieldConfig {
+  field: string;
+  mask: string;
+}
+
+export interface SensitiveMaskingConfig {
+  enabled?: boolean;
+  fields?: SensitiveFieldConfig[];
+}
+
 export interface LoggerConfig {
   level?: LogLevelName;
   console?: ConsoleConfig;
   file?: FileConfig;
   pattern?: string;
+  sensitiveMasking?: SensitiveMaskingConfig;
 }
 
 export interface LoggerOptions {

@@ -10,6 +10,7 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 import { ConfigLoader } from './ConfigLoader';
 import { LogPosition } from './LogPosition';
 import { LoggerContext } from './LoggerContext';
+import { SensitiveMasker } from './SensitiveMasker';
 import { getDefaultConfig, DEFAULT_PATTERN } from '../config/defaultConfig';
 import type { LoggerConfig, ShutdownOptions, LogLevelName } from '../types';
 
@@ -24,6 +25,9 @@ function serializeMeta(meta: unknown[]): unknown[] {
   return meta.map(m => {
     if (m instanceof Error) {
       return { message: m.message, stack: m.stack };
+    }
+    if (m !== null && typeof m === 'object') {
+      return SensitiveMasker.mask(m);
     }
     return m;
   });
@@ -69,6 +73,7 @@ export class LoggerFactory {
   private static container: winston.Container | null = null;
   private static initialized = false;
   private static isShuttingDown = false;
+  private static maskingInitialized = false;
 
   private static createLogger(name: string, config: LoggerConfig): winston.Logger {
     const transports: winston.transport[] = [];
@@ -279,6 +284,20 @@ export class LoggerFactory {
     this.container = null;
     this.initialized = false;
     this.isShuttingDown = false;
+    this.maskingInitialized = false;
     ConfigLoader.reset();
+    SensitiveMasker.reset();
+  }
+
+  private static getSensitiveMaskingConfig(): import('../types').SensitiveMaskingConfig | undefined {
+    const config = ConfigLoader.getConfig() || getDefaultConfig();
+    return config.sensitiveMasking;
+  }
+
+  private static ensureMaskingInitialized(): void {
+    if (!this.maskingInitialized) {
+      SensitiveMasker.init(this.getSensitiveMaskingConfig());
+      this.maskingInitialized = true;
+    }
   }
 }
