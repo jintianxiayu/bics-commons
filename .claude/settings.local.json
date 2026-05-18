@@ -12,7 +12,9 @@
       "Bash(npx tsc *)",
       "Bash(npm test *)",
       "Bash(node -e ' *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(npx jest *)",
+      "Bash(npx ts-node *)"
     ]
   }
 }
