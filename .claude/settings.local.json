@@ -1,23 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm --version)",
-      "Bash(git init *)",
-      "Bash(npx lerna *)",
-      "Bash(npm install *)",
-      "Bash(npm run *)",
-      "Bash(git add *)",
-      "Bash(git commit *)",
-      "mcp__MiniMax__web_search",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(npx tsc *)",
-      "Bash(npm show *)",
-      "Bash(npm test *)",
-      "Bash(npx eslint *)",
-      "Bash(git checkout *)",
-      "Bash(git merge *)",
-      "Bash(git stash *)"
+      "Skill(commit-commands:commit)"
     ]
   }
 }
