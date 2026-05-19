@@ -1,7 +1,7 @@
 /**
  * 日志位置捕获
  *
- * 通过解析调用栈来定位业务代码的调用位置（文件:行号:列号）
+ * 通过解析调用栈来定位业务代码的调用位置（相对路径:行号）
  */
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -19,6 +19,13 @@ const EXCLUDE_PATTERNS: RegExp[] = [
   /\/node_modules\//,
   /node:/,
 ];
+
+// Project root directory for stripping absolute paths
+const PROJECT_ROOT = (() => {
+  // Use process.cwd() as the project root (the directory containing packages/)
+  const cwd = process.cwd().replace(/\\/g, '/');
+  return cwd.endsWith('/') ? cwd : cwd + '/';
+})();
 
 const EXCLUDE_METHOD_PREFIXES: string[] = [
   'Logger.',
@@ -58,7 +65,7 @@ export class LogPosition {
   /**
    * 捕获调用位置
    *
-   * 从当前调用栈中找到第一个业务代码帧，返回 "file:line:column" 格式的字符串
+   * 从当前调用栈中找到第一个业务代码帧，返回 "relativePath:line" 格式的字符串
    */
   static capture(): string {
     const originalLimit = Error.stackTraceLimit;
@@ -77,15 +84,27 @@ export class LogPosition {
       };
 
       if (!this.isInternalFrame(frame)) {
-        return `${frame.fileName}:${frame.lineNumber}:${frame.columnNumber}`;
+        let fileName = frame.fileName;
+        // Normalize to forward slashes for consistent path comparison
+        fileName = fileName.replace(/\\/g, '/');
+        // Strip project root to get relative path
+        if (PROJECT_ROOT && fileName.startsWith(PROJECT_ROOT)) {
+          fileName = fileName.substring(PROJECT_ROOT.length);
+        }
+        // Return simplified format: relativePath:line
+        return `${fileName}:${frame.lineNumber}`;
       }
     }
 
     const lastFrame = stack[stack.length - 1];
     if (lastFrame) {
-      return `${lastFrame.file || ''}:${lastFrame.lineNumber || 0}:${lastFrame.column || 0}`;
+      let fileName = lastFrame.file || '';
+      if (PROJECT_ROOT && fileName.startsWith(PROJECT_ROOT)) {
+        fileName = fileName.substring(PROJECT_ROOT.length);
+      }
+      return `${fileName}:${lastFrame.lineNumber || 0}`;
     }
 
-    return 'unknown:0:0';
+    return 'unknown:0';
   }
 }

@@ -12,7 +12,7 @@ import { LogPosition } from './LogPosition';
 import { LoggerContext } from './LoggerContext';
 import { SensitiveMasker } from './SensitiveMasker';
 import { getDefaultConfig, DEFAULT_PATTERN } from '../config/defaultConfig';
-import type { LoggerConfig, ShutdownOptions, LogLevelName } from '../types';
+import type { LoggerConfig, ShutdownOptions } from '../types';
 
 interface LoggerInterface {
   debug(message: string, ...meta: unknown[]): void;
@@ -73,53 +73,8 @@ export class LoggerFactory {
   private static container: winston.Container | null = null;
   private static initialized = false;
   private static isShuttingDown = false;
-  private static maskingInitialized = false;
 
-  private static createLogger(name: string, config: LoggerConfig): winston.Logger {
-    const transports: winston.transport[] = [];
-
-    if (config.console?.enabled !== false) {
-      const consoleFormat = winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.colorize({ all: config.console?.colors !== false }),
-        createFormat(config.pattern || DEFAULT_PATTERN)
-      );
-
-      transports.push(
-        new winston.transports.Console({
-          format: consoleFormat,
-        })
-      );
-    }
-
-    if (config.file?.enabled) {
-      const fileFormat = winston.format.combine(
-        winston.format.timestamp(),
-        createFormat(config.pattern || DEFAULT_PATTERN)
-      );
-
-      transports.push(
-        new DailyRotateFile({
-          dirname: config.file.dirname || './logs',
-          filename: config.file.filename || 'app',
-          datePattern: config.file.datePattern || 'YYYY-MM-DD',
-          maxSize: config.file.maxSize || '10m',
-          maxFiles: config.file.maxFiles || '7d',
-          format: fileFormat,
-        })
-      );
-    }
-
-    const logger = winston.createLogger({
-      level: config.level || 'info',
-      format: winston.format.json(),
-      transports,
-      defaultMeta: { name },
-    });
-
-    return logger;
-  }
-
+  // Reserved for future use
   private static ensureContainer(): winston.Container {
     if (!this.container) {
       this.container = new winston.Container();
@@ -181,7 +136,6 @@ export class LoggerFactory {
     }
 
     const winstonLogger = container.get(name);
-    const pattern = config.pattern || DEFAULT_PATTERN;
 
     return {
       debug(message: string, ...meta: unknown[]): void {
@@ -284,20 +238,7 @@ export class LoggerFactory {
     this.container = null;
     this.initialized = false;
     this.isShuttingDown = false;
-    this.maskingInitialized = false;
     ConfigLoader.reset();
     SensitiveMasker.reset();
-  }
-
-  private static getSensitiveMaskingConfig(): import('../types').SensitiveMaskingConfig | undefined {
-    const config = ConfigLoader.getConfig() || getDefaultConfig();
-    return config.sensitiveMasking;
-  }
-
-  private static ensureMaskingInitialized(): void {
-    if (!this.maskingInitialized) {
-      SensitiveMasker.init(this.getSensitiveMaskingConfig());
-      this.maskingInitialized = true;
-    }
   }
 }

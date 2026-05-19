@@ -9,22 +9,21 @@ describe('LogPosition', () => {
     it('should capture caller position from stack', () => {
       const position = LogPosition.capture();
 
-      expect(position).toMatch(/^.+:\d+:\d+$/);
+      expect(position).toMatch(/^.+:\d+$/);
     });
 
-    it('should return valid file:line:column format', () => {
+    it('should return valid relativePath:line format', () => {
       const position = LogPosition.capture();
       // On Windows, paths contain drive letter like D:\, so we check format differently
       const parts = position.split(':');
-      // Windows paths have drive letter, so we get 4 parts: D, \path, line, column
-      // Or on Unix we get 3 parts: /path/to/file, line, column
+      // Windows paths have drive letter, so we get at least 3 parts: D, \path, line
+      // Or on Unix we get 2 parts: /path/to/file, line
 
-      if (parts.length >= 3) {
-        // Last two parts should be numbers (line and column)
-        expect(parseInt(parts[parts.length - 2])).toBeGreaterThan(0);
-        expect(parseInt(parts[parts.length - 1])).toBeGreaterThanOrEqual(0);
+      if (parts.length >= 2) {
+        // Last part should be a number (line)
+        expect(parseInt(parts[parts.length - 1])).toBeGreaterThan(0);
       } else {
-        fail('Position should have at least 3 parts when split by :');
+        fail('Position should have at least 2 parts when split by :');
       }
     });
 

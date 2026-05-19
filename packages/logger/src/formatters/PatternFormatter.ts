@@ -1,5 +1,5 @@
 import winston from 'winston';
-import { getLogPosition } from '../core/LogPosition';
+import { LogPosition } from '../core/LogPosition';
 
 /**
  * Pattern 占位符解析器映射
@@ -20,7 +20,7 @@ const PLACEHOLDERS = {
     const metaStr = JSON.stringify(meta);
     return metaStr === '{}' ? '' : metaStr;
   },
-  log_position: () => getLogPosition(),
+  log_position: () => LogPosition.capture(),
 };
 
 /**

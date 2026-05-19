@@ -7,7 +7,7 @@
 import { readFileSync } from 'fs';
 import { parse as yamlParse } from 'yaml';
 import { getDefaultConfig } from '../config/defaultConfig';
-import type { LoggerConfig, LoggerOptions } from '../types';
+import type { LoggerConfig } from '../types';
 
 const CONFIG_ENV_KEY = 'LOGGER_CONFIG_PATH';
 const DEFAULT_CONFIG_PATH = './logger.yaml';
