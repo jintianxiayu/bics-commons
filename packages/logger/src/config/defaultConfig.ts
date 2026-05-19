@@ -29,7 +29,7 @@ export const DEFAULT_SENSITIVE_FIELDS: SensitiveFieldConfig[] = [
 
 export const DEFAULT_PATTERN = '%{timestamp} %{level} [%{name}] [%{traceId}] %{log_position}: %{message} %{meta}';
 
-export const DEFAULT_LOG_LEVEL: 'info' = 'info';
+export const DEFAULT_LOG_LEVEL = 'info' as const;
 
 export const defaultConfig: LoggerConfig = {
   level: DEFAULT_LOG_LEVEL,

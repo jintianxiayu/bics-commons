@@ -73,7 +73,7 @@ describe('SensitiveMasker', () => {
     it('should handle deep nesting within limit', () => {
       SensitiveMasker.init({ fields: [{ field: 'secret', mask: '****' }] });
       const deep = { l1: { l2: { l3: { l4: { l5: { secret: 'data' } } } } } };
-      const result = SensitiveMasker.mask(deep) as any;
+      const result = SensitiveMasker.mask(deep) as { l1: { l2: { l3: { l4: { l5: { secret: string } } } } } };
       expect(result.l1.l2.l3.l4.l5.secret).toBe('****');
     });
 
@@ -82,7 +82,7 @@ describe('SensitiveMasker', () => {
       const deep = {
         l1: { l2: { l3: { l4: { l5: { l6: { secret: 'data' } } } } } }
       };
-      const result = SensitiveMasker.mask(deep) as any;
+      const result = SensitiveMasker.mask(deep) as { l1: { l2: { l3: { l4: { l5: { secret: string } } } } } };
       expect(result.l1.l2.l3.l4.l5.l6).toBe('[MAX_DEPTH_EXCEEDED]');
     });
   });
