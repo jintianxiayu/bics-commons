@@ -6,3 +6,6 @@ dist/
 coverage/
 .env
 .env.local
+.vscode/
+.claude/settings.local.json
+.codegraph/
