@@ -39,12 +39,13 @@ export class MemoryCacheProvider implements CacheProvider {
   }
 
   /**
-   * 根据条件删除匹配的键
-   * @param predicate 匹配条件回调
+   * 根据模式删除匹配的缓存键
+   * @param pattern glob模式字符串（如 user:*），末尾的 * 作为前缀匹配
    */
-  deleteByPattern(predicate: (key: string) => boolean): void {
+  deleteByPattern(pattern: string): void {
+    const prefix = pattern.replace(/\*$/, '');
     for (const key of this.cache.keys()) {
-      if (predicate(key)) {
+      if (key.startsWith(prefix)) {
         this.cache.delete(key);
       }
     }

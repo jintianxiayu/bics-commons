@@ -61,7 +61,7 @@ describe('MemoryCacheProvider', () => {
       provider.set('user:2', 'user2');
       provider.set('order:1', 'order1');
 
-      provider.deleteByPattern((key: string) => key.startsWith('user:'));
+      provider.deleteByPattern('user:*');
 
       expect(provider.get('user:1')).toBeUndefined();
       expect(provider.get('user:2')).toBeUndefined();

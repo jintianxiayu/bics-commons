@@ -28,4 +28,10 @@ export interface CacheProvider {
    * 清除所有缓存
    */
   clear(): void | Promise<void>;
+
+  /**
+   * 根据模式删除匹配的缓存键
+   * @param pattern glob模式字符串（如 user:*），末尾的 * 作为前缀匹配
+   */
+  deleteByPattern(pattern: string): void | Promise<void>;
 }

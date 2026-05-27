@@ -105,7 +105,7 @@ class UserService {
 缓存清除装饰器。**必须用于返回 Promise 的方法**。
 
 - `cacheName`: 缓存名称
-- `options.allEntries`: 清除所有条目，默认 false
+- `options.allEntries`: 清除该缓存名称下的所有条目（而非所有缓存），默认 false
 - `options.providerName`: 指定 CacheProvider
 - `options.key`: 自定义缓存 key，与 `@Cache` 行为一致。当 `allEntries: true` 时忽略
 

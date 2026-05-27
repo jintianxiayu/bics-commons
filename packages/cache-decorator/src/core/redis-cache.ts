@@ -40,13 +40,23 @@ export class RedisCacheProvider implements CacheProvider {
   }
 
   /**
-   * 根据模式删除匹配的键
-   * @param pattern Redis 键模式（如 user:*）
+   * 根据模式删除匹配的缓存键
+   * @param pattern glob模式字符串（如 user:*），使用 SCAN 游标迭代避免阻塞 Redis
    */
   async deleteByPattern(pattern: string): Promise<void> {
-    const keys = await this.redis.keys(pattern);
-    if (keys.length > 0) {
-      await this.redis.del(...keys);
-    }
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        100,
+      );
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } while (cursor !== '0');
   }
 }

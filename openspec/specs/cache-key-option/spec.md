@@ -1,6 +1,10 @@
 # Spec: cache-key-option
 
-## ADDED Requirements
+## Purpose
+
+提供自定义缓存 key 的能力，支持通过 `key` 选项配置自定义缓存 key 生成逻辑，以及通过 `allEntries` 选项按缓存名称精确清除缓存条目。
+
+## Requirements
 
 ### Requirement: @Cache 装饰器支持自定义 key 选项
 
@@ -48,7 +52,7 @@
 #### Scenario: allEntries 为 true 时忽略 key 选项
 
 - **WHEN** 调用 `@CacheEvict("users", { allEntries: true, key: "ignored-key" })` 装饰的方法
-- **THEN** 执行 `provider.clear()` 清除所有缓存，忽略 `key` 选项
+- **THEN** 执行 `provider.deleteByPattern("users*")` 精确清除 users 缓存名称下的所有条目，忽略 `key` 选项
 
 ### Requirement: 向后兼容性
 

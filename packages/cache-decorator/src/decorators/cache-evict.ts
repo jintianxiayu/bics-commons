@@ -59,7 +59,7 @@ export function CacheEvict(cacheName: string, options?: CacheEvictOptions) {
       const provider = CacheProviderRegistry.get(providerName);
 
       if (options?.allEntries) {
-        provider.clear();
+        await provider.deleteByPattern(cacheName + '*');
       } else {
         const cacheKey = resolveCacheKey(cacheName, options?.key, args);
         provider.delete(cacheKey);

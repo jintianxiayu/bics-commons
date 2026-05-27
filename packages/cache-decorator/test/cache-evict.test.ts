@@ -87,7 +87,7 @@ describe('@CacheEvict 装饰器', () => {
       await service.getUser(2);
       await service.getOrder(1);
       expect(getUserCallCount).toBe(4);
-      expect(getOrderCallCount).toBe(2);
+      expect(getOrderCallCount).toBe(1);
     });
   });
 
