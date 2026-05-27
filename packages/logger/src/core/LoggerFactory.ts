@@ -73,6 +73,7 @@ export class LoggerFactory {
   private static container: winston.Container | null = null;
   private static initialized = false;
   private static isShuttingDown = false;
+  private static wrapperCache = new Map<string, LoggerInterface>();
 
   // Reserved for future use
   private static ensureContainer(): winston.Container {
@@ -116,6 +117,11 @@ export class LoggerFactory {
   static getLogger(name: string): LoggerInterface {
     this.lazyInit();
 
+    const cached = this.wrapperCache.get(name);
+    if (cached) {
+      return cached;
+    }
+
     const container = this.ensureContainer();
     let config: LoggerConfig;
 
@@ -137,7 +143,7 @@ export class LoggerFactory {
 
     const winstonLogger = container.get(name);
 
-    return {
+    const wrapper: LoggerInterface = {
       debug(message: string, ...meta: unknown[]): void {
         winstonLogger.debug(message, { meta: serializeMeta(meta) });
       },
@@ -151,6 +157,9 @@ export class LoggerFactory {
         winstonLogger.error(message, { meta: serializeMeta(meta) });
       },
     };
+
+    this.wrapperCache.set(name, wrapper);
+    return wrapper;
   }
 
   private static createTransports(config: LoggerConfig): winston.transport[] {
@@ -238,6 +247,7 @@ export class LoggerFactory {
     this.container = null;
     this.initialized = false;
     this.isShuttingDown = false;
+    this.wrapperCache.clear();
     ConfigLoader.reset();
     SensitiveMasker.reset();
   }

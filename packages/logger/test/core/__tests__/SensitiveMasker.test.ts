@@ -82,7 +82,7 @@ describe('SensitiveMasker', () => {
       const deep = {
         l1: { l2: { l3: { l4: { l5: { l6: { secret: 'data' } } } } } }
       };
-      const result = SensitiveMasker.mask(deep) as { l1: { l2: { l3: { l4: { l5: { secret: string } } } } } };
+      const result = SensitiveMasker.mask(deep) as { l1: { l2: { l3: { l4: { l5: { l6: { secret: string } } } } } } };
       expect(result.l1.l2.l3.l4.l5.l6).toBe('[MAX_DEPTH_EXCEEDED]');
     });
   });

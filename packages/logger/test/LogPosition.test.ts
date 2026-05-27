@@ -21,7 +21,7 @@ describe('LogPosition', () => {
 
       if (parts.length >= 2) {
         // Last part should be a number (line)
-        expect(parseInt(parts[parts.length - 1])).toBeGreaterThan(0);
+        expect(parseInt(parts[parts.length - 1]!)).toBeGreaterThan(0);
       } else {
         fail('Position should have at least 2 parts when split by :');
       }
