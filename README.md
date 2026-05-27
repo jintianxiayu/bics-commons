@@ -9,6 +9,7 @@ TypeScript 工具库 monorepo，基于 Lerna + Yarn/NPM Workspaces 管理。
 | [@bics/logger](./packages/logger) | 0.0.0 | SLF4J 风格的日志工厂，基于 Winston 实现 |
 | [@bics/cache-decorator](./packages/cache-decorator) | 0.0.1 | TypeScript 方法缓存装饰器 |
 | [@bics/http-client-decorator](./packages/http-client-decorator) | 0.0.0 | 基于装饰器的 HTTP 客户端框架 |
+| [@bics/lock-decorator](./packages/lock-decorator) | 0.0.1 | 分布式锁装饰器，支持 Redis 存储和看门狗自动续期 |
 
 ## 快速开始
 
@@ -44,7 +45,8 @@ bics-commons/
 ├── packages/
 │   ├── logger/                # @bics/logger
 │   ├── cache-decorator/       # @bics/cache-decorator
-│   └── http-client-decorator/ # @bics/http-client-decorator
+│   ├── http-client-decorator/ # @bics/http-client-decorator
+│   └── lock-decorator/        # @bics/lock-decorator
 ├── openspec/                  # 变更追踪文档
 ├── lerna.json                 # Lerna 配置
 ├── package.json               # 根 workspace 配置
