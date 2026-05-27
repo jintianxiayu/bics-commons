@@ -160,4 +160,97 @@ describe('@Cache 装饰器', () => {
       expect(callCount).toBe(1);
     });
   });
+
+  describe('key 选项', () => {
+    it('key 为 undefined 时使用自动生成逻辑', async () => {
+      class UserService {
+        callCount = 0;
+
+        @Cache('user-cache', { key: undefined })
+        async getUser(id: number) {
+          this.callCount++;
+          return { id };
+        }
+      }
+
+      const service = new UserService();
+      await service.getUser(1);
+      await service.getUser(1);
+      expect(service.callCount).toBe(1);
+    });
+
+    it('key 为 null 时使用自动生成逻辑', async () => {
+      class UserService {
+        callCount = 0;
+
+        @Cache('user-cache', { key: null })
+        async getUser(id: number) {
+          this.callCount++;
+          return { id };
+        }
+      }
+
+      const service = new UserService();
+      await service.getUser(1);
+      await service.getUser(1);
+      expect(service.callCount).toBe(1);
+    });
+
+    it('key 为字符串时使用字符串值', async () => {
+      class UserService {
+        callCount = 0;
+
+        @Cache('user-cache', { key: 'specific-key' })
+        async getUser(id: number) {
+          this.callCount++;
+          return { id };
+        }
+      }
+
+      const service = new UserService();
+      await service.getUser(1);
+      await service.getUser(2);
+      expect(service.callCount).toBe(1);
+    });
+
+    it('key 为函数时使用函数返回值', async () => {
+      class UserService {
+        callCount = 0;
+
+        @Cache('user-cache', { key: (...args: unknown[]) => String(args[0]) })
+        async getUser(id: number) {
+          this.callCount++;
+          return { id };
+        }
+      }
+
+      const service = new UserService();
+      await service.getUser(1);
+      await service.getUser(1);
+      expect(service.callCount).toBe(1);
+      await service.getUser(2);
+      expect(service.callCount).toBe(2);
+    });
+
+    it('key 函数抛出异常时降级到自动生成', async () => {
+      class UserService {
+        callCount = 0;
+
+        @Cache('user-cache', {
+          key: () => {
+            throw new Error('bad key');
+          },
+        })
+        async getUser(id: number) {
+          this.callCount++;
+          return { id };
+        }
+      }
+
+      const service = new UserService();
+      await service.getUser(1);
+      await service.getUser(1);
+      expect(service.callCount).toBe(1);
+    });
+  });
 });

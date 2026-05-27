@@ -58,6 +58,32 @@ class UserService {
 }
 ```
 
+### 自定义缓存 Key
+
+通过 `key` 选项自定义缓存 key 生成逻辑：
+
+```typescript
+class UserService {
+  // 使用字符串作为 key，所有调用共享同一缓存
+  @Cache('config', { key: 'global-config' })
+  async getConfig() {
+    return { ... };
+  }
+
+  // 使用函数基于参数生成 key
+  @Cache('user', { key: (...args) => String(args[0]) })
+  async getUser(id: number) {
+    return { id };
+  }
+
+  // 清除时使用相同的 key 函数
+  @CacheEvict('user', { key: (...args) => String(args[0]) })
+  async deleteUser(id: number) {
+    return { id, deleted: true };
+  }
+}
+```
+
 
 
 ## API
@@ -69,6 +95,10 @@ class UserService {
 - `cacheName`: 缓存名称
 - `options.ttl`: 过期时间（秒）
 - `options.providerName`: 指定 CacheProvider
+- `options.key`: 自定义缓存 key，支持以下形式：
+  - `undefined/null`: 使用默认逻辑，基于方法参数生成 key
+  - `string`: 直接作为 key 值，格式为 `cacheName:keyValue`
+  - `function`: 接收方法参数数组，返回自定义字符串
 
 ### @CacheEvict(cacheName, options?)
 
@@ -77,6 +107,7 @@ class UserService {
 - `cacheName`: 缓存名称
 - `options.allEntries`: 清除所有条目，默认 false
 - `options.providerName`: 指定 CacheProvider
+- `options.key`: 自定义缓存 key，与 `@Cache` 行为一致。当 `allEntries: true` 时忽略
 
 ### CacheProviderRegistry
 

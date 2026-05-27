@@ -1,10 +1,11 @@
 import { CacheProviderRegistry } from '../core/cache-provider-registry';
 import { KeyBuilder } from '../core/key-builder';
+import { CacheOptions, CacheKeyResolver } from './cache';
 
 /**
  * @CacheEvict 装饰器配置项
  */
-export interface CacheEvictOptions {
+export interface CacheEvictOptions extends Pick<CacheOptions, 'key'> {
   /**
    * 是否清除所有条目，默认为 false
    */
@@ -14,6 +15,27 @@ export interface CacheEvictOptions {
    * 指定 CacheProvider 名称
    */
   providerName?: string;
+}
+
+/**
+ * 解析缓存 key
+ * @param cacheName 缓存名称
+ * @param keyResolver key 解析器
+ * @param args 方法参数数组
+ * @returns 解析后的缓存 key
+ */
+function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | undefined, args: unknown[]): string {
+  if (keyResolver === undefined || keyResolver === null) {
+    return KeyBuilder.build(cacheName, args);
+  }
+  if (typeof keyResolver === 'string') {
+    return KeyBuilder.build(cacheName, [keyResolver]);
+  }
+  try {
+    return KeyBuilder.build(cacheName, [keyResolver(...args)]);
+  } catch {
+    return KeyBuilder.build(cacheName, args);
+  }
 }
 
 /**
@@ -39,7 +61,7 @@ export function CacheEvict(cacheName: string, options?: CacheEvictOptions) {
       if (options?.allEntries) {
         provider.clear();
       } else {
-        const cacheKey = KeyBuilder.build(cacheName, args);
+        const cacheKey = resolveCacheKey(cacheName, options?.key, args);
         provider.delete(cacheKey);
       }
 
