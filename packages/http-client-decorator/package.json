@@ -1,6 +1,6 @@
 {
     "name": "@bics/http-client-decorator",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "description": "Decorator-based HTTP client framework providing RPC-like calling experience",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -21,7 +21,7 @@
         "@bics/logger": "*"
     },
     "devDependencies": {
-        "@bics/logger": "*",
+        "@bics/logger": "^0.1.0",
         "axios-mock-adapter": "^2.1.0",
         "ts-jest": "^29.2.5"
     }
