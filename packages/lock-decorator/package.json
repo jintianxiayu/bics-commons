@@ -1,6 +1,6 @@
 {
     "name": "@jintianxiayu/lock-decorator",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "description": "Distributed lock decorators for TypeScript",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
