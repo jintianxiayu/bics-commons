@@ -22,5 +22,8 @@
     },
     "peerDependencies": {
         "reflect-metadata": "^0.2.2"
+    },
+    "publishConfig": {
+        "access": "public"
     }
 }
