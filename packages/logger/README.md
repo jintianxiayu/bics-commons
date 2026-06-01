@@ -1,4 +1,4 @@
-# @bics/logger
+# @jintianxiayu/logger
 
 SLF4J 风格的日志工厂，基于 Winston 实现。
 
@@ -15,13 +15,13 @@ SLF4J 风格的日志工厂，基于 Winston 实现。
 ## 安装
 
 ```bash
-npm install @bics/logger
+npm install @jintianxiayu/logger
 ```
 
 ## 快速开始
 
 ```typescript
-import { LoggerFactory } from '@bics/logger';
+import { LoggerFactory } from '@jintianxiayu/logger';
 
 const logger = LoggerFactory.getLogger('app');
 
@@ -143,7 +143,7 @@ interface LoggerInterface {
 ## 类型导出
 
 ```typescript
-import { LoggerFactory, ConfigLoader, LogPosition, LoggerContext, SensitiveMasker } from '@bics/logger';
+import { LoggerFactory, ConfigLoader, LogPosition, LoggerContext, SensitiveMasker } from '@jintianxiayu/logger';
 import type {
   LoggerConfig,
   LoggerOptions,
@@ -154,7 +154,7 @@ import type {
   LoggerInterface,
   SensitiveFieldConfig,
   SensitiveMaskingConfig,
-} from '@bics/logger';
+} from '@jintianxiayu/logger';
 ```
 
 ## 默认配置
@@ -234,7 +234,7 @@ app.use((req, res, next) => {
 LoggerContext 提供基于 AsyncLocalStorage 的上下文传递，支持 traceId 在异步调用链中自动传递。
 
 ```typescript
-import { LoggerFactory, LoggerContext } from '@bics/logger';
+import { LoggerFactory, LoggerContext } from '@jintianxiayu/logger';
 
 const logger = LoggerFactory.getLogger('http');
 

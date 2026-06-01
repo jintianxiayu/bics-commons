@@ -1,4 +1,4 @@
-# @bics/http-client-decorator
+# @jintianxiayu/http-client-decorator
 
 基于装饰器的 HTTP 客户端框架，提供 RPC-like 调用体验。
 
@@ -14,7 +14,7 @@
 ## 安装
 
 ```bash
-npm install @bics/http-client-decorator
+npm install @jintianxiayu/http-client-decorator
 ```
 
 ## 快速开始
@@ -30,7 +30,7 @@ import {
   Query,
   Body,
   Header,
-} from '@bics/http-client-decorator';
+} from '@jintianxiayu/http-client-decorator';
 
 @HttpClient({
   baseURL: 'https://api.example.com',
@@ -80,7 +80,7 @@ const users = await userService.listUsers('1', '10');
 ### 定义中间件
 
 ```typescript
-import type { Middleware, HttpContext } from '@bics/http-client-decorator';
+import type { Middleware, HttpContext } from '@jintianxiayu/http-client-decorator';
 
 const authMiddleware: Middleware = async (ctx: HttpContext, next) => {
   // 请求前处理
@@ -118,7 +118,7 @@ class UserService {}
 HTTP 4xx/5xx 响应会抛出 `HttpError` 异常：
 
 ```typescript
-import { HttpError } from '@bics/http-client-decorator';
+import { HttpError } from '@jintianxiayu/http-client-decorator';
 
 try {
   await userService.getUser('not-found');

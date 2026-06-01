@@ -21,6 +21,7 @@
         "@jintianxiayu/logger": "*"
     },
     "devDependencies": {
+        "@jintianxiayu/logger": "^0.1.0",
         "axios-mock-adapter": "^2.1.0",
         "ts-jest": "^29.2.5"
     }

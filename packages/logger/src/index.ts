@@ -1,5 +1,5 @@
 /**
- * @bics/logger - SLF4J 风格的日志工厂
+ * @jintianxiayu/logger - SLF4J 风格的日志工厂
  *
  * 基于 Winston 的生产级日志库，支持：
  * - YAML 配置文件
@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * import { LoggerFactory } from '@bics/logger';
+ * import { LoggerFactory } from '@jintianxiayu/logger';
  *
  * const logger = LoggerFactory.getLogger('database');
  * logger.info('connection opened');

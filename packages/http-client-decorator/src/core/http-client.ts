@@ -1,9 +1,9 @@
 import axios, { type AxiosRequestConfig, AxiosError } from 'axios';
 import { HttpError } from './http-error';
 import type { HttpContext } from './middleware';
-import { LoggerFactory } from '@bics/logger';
+import { LoggerFactory } from '@jintianxiayu/logger';
 
-const logger = LoggerFactory.getLogger('@bics/http-client-decorator');
+const logger = LoggerFactory.getLogger('@jintianxiayu/http-client-decorator');
 
 /**
  * 创建 HTTP 请求函数

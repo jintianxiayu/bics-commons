@@ -1,5 +1,5 @@
 /**
- * @bics/http-client-decorator - 基于装饰器的 HTTP 客户端框架
+ * @jintianxiayu/http-client-decorator - 基于装饰器的 HTTP 客户端框架
  *
  * 提供 RPC-like 调用体验的 HTTP 客户端框架，支持：
  * - 装饰器声明式 HTTP 方法定义

@@ -1,5 +1,5 @@
 /**
- * @bics/logger 使用示例
+ * @jintianxiayu/logger 使用示例
  *
  * 运行方式：
  * 1. 直接运行: npx ts-node examples/demo.ts

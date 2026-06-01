@@ -1,11 +1,11 @@
-# @bics/lock-decorator
+# @jintianxiayu/lock-decorator
 
 分布式锁装饰器，为 TypeScript 方法提供声明式分布式锁功能。
 
 ## 安装
 
 ```bash
-npm install @bics/lock-decorator reflect-metadata
+npm install @jintianxiayu/lock-decorator reflect-metadata
 ```
 
 ## 特性
@@ -26,7 +26,7 @@ npm install @bics/lock-decorator reflect-metadata
 
 ```typescript
 import 'reflect-metadata';
-import { DistributedLock, LockProviderRegistry, RedisLockProvider } from '@bics/lock-decorator';
+import { DistributedLock, LockProviderRegistry, RedisLockProvider } from '@jintianxiayu/lock-decorator';
 import Redis from 'ioredis';
 
 // 注册 Redis Provider
@@ -49,7 +49,7 @@ class OrderService {
 
 ```typescript
 import 'reflect-metadata';
-import { DistributedLock, LockProviderRegistry } from '@bics/lock-decorator';
+import { DistributedLock, LockProviderRegistry } from '@jintianxiayu/lock-decorator';
 
 LockProviderRegistry.register('redis', new RedisLockProvider(new Redis()));
 LockProviderRegistry.setDefault('redis');
@@ -158,7 +158,7 @@ interface DistributedLockOptions {
 全局锁提供者注册表。
 
 ```typescript
-import { LockProviderRegistry } from '@bics/lock-decorator';
+import { LockProviderRegistry } from '@jintianxiayu/lock-decorator';
 
 // 注册提供者
 LockProviderRegistry.register('redis', new RedisLockProvider(redis));
@@ -184,7 +184,7 @@ LockProviderRegistry.clear();
 
 ```typescript
 import Redis from 'ioredis';
-import { RedisLockProvider } from '@bics/lock-decorator';
+import { RedisLockProvider } from '@jintianxiayu/lock-decorator';
 
 const redis = new Redis();
 const lockProvider = new RedisLockProvider(redis);
@@ -203,7 +203,7 @@ const lockProvider = new RedisLockProvider(redis);
 锁获取失败时抛出的异常。
 
 ```typescript
-import { LockAcquisitionError } from '@bics/lock-decorator';
+import { LockAcquisitionError } from '@jintianxiayu/lock-decorator';
 
 try {
   await service.criticalOperation();
@@ -219,7 +219,7 @@ try {
 看门狗自动续期线程。每隔 `renewInterval` 毫秒自动调用 `renew()` 续期，续期失败时停止。
 
 ```typescript
-import { Watchdog } from '@bics/lock-decorator';
+import { Watchdog } from '@jintianxiayu/lock-decorator';
 
 const watchdog = new Watchdog({
   provider,

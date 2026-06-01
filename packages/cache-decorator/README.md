@@ -1,11 +1,11 @@
-# @bics/cache-decorator
+# @jintianxiayu/cache-decorator
 
 方法缓存装饰器，为 TypeScript 方法提供声明式缓存功能。
 
 ## 安装
 
 ```bash
-npm install @bics/cache-decorator reflect-metadata
+npm install @jintianxiayu/cache-decorator reflect-metadata
 ```
 
 ## 特性
@@ -39,7 +39,7 @@ npm install @bics/cache-decorator reflect-metadata
 
 ```typescript
 import 'reflect-metadata';
-import { Cache, CacheEvict, CacheProviderRegistry, MemoryCacheProvider } from '@bics/cache-decorator';
+import { Cache, CacheEvict, CacheProviderRegistry, MemoryCacheProvider } from '@jintianxiayu/cache-decorator';
 
 // 注册默认 Provider
 CacheProviderRegistry.register('memory', new MemoryCacheProvider());

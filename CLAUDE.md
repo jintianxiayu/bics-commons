@@ -15,7 +15,7 @@ npm run build
 npm test
 
 # 单个包测试
-npx lerna run test --scope=@bics/logger
+npx lerna run test --scope=@jintianxiayu/logger
 
 # 代码格式检查
 npm run format:check
@@ -35,16 +35,16 @@ npm run format
 
 ```
 packages/
-├── logger/                # @bics/logger - 日志工厂
-├── cache-decorator/       # @bics/cache-decorator - 缓存装饰器
-└── http-client-decorator/ # @bics/http-client-decorator - HTTP 客户端
+├── logger/                # @jintianxiayu/logger - 日志工厂
+├── cache-decorator/       # @jintianxiayu/cache-decorator - 缓存装饰器
+└── http-client-decorator/ # @jintianxiayu/http-client-decorator - HTTP 客户端
 ```
 
 ### 包设计模式
 
-- **@bics/logger**: 基于 Winston 的 SLF4J 风格日志工厂，支持 YAML 配置、敏感信息脱敏、AsyncLocalStorage traceId 传递
-- **@bics/cache-decorator**: 装饰器驱动的缓存方案，`@Cache` 和 `@CacheEvict` 装饰器，仅适用于返回 Promise 的方法
-- **@bics/http-client-decorator**: 装饰器声明式 HTTP 客户端，Koa 风格中间件机制
+- **@jintianxiayu/logger**: 基于 Winston 的 SLF4J 风格日志工厂，支持 YAML 配置、敏感信息脱敏、AsyncLocalStorage traceId 传递
+- **@jintianxiayu/cache-decorator**: 装饰器驱动的缓存方案，`@Cache` 和 `@CacheEvict` 装饰器，仅适用于返回 Promise 的方法
+- **@jintianxiayu/http-client-decorator**: 装饰器声明式 HTTP 客户端，Koa 风格中间件机制
 
 ### TypeScript 配置
 
