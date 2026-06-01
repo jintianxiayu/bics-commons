@@ -1,5 +1,5 @@
 {
-    "name": "@bics/lock-decorator",
+    "name": "@jintianxiayu/lock-decorator",
     "version": "0.1.0",
     "description": "Distributed lock decorators for TypeScript",
     "main": "dist/index.js",

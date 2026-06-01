@@ -1,5 +1,5 @@
 {
-    "name": "@bics/cache-decorator",
+    "name": "@jintianxiayu/cache-decorator",
     "version": "0.1.0",
     "description": "Method caching decorators for TypeScript",
     "main": "dist/index.js",

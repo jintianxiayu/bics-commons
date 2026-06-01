@@ -1,5 +1,5 @@
 {
-    "name": "@bics/logger",
+    "name": "@jintianxiayu/logger",
     "version": "0.1.0",
     "description": "Logger utility for bics-commons - SLF4J-style logging factory based on Winston",
     "main": "dist/index.js",
