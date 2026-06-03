@@ -9,10 +9,10 @@
  * @param headers - 默认请求头
  */
 export interface HttpClientConfig {
-  baseURL: string;
-  middlewares?: readonly Middleware[];
-  timeout?: number;
-  headers?: Readonly<Record<string, string>>;
+    baseURL: string;
+    middlewares?: readonly Middleware[];
+    timeout?: number;
+    headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -24,10 +24,7 @@ export interface HttpClientConfig {
  * @param next - 调用下一个中间件的函数
  * @throws 当中间件执行出错时
  */
-export type Middleware = (
-  ctx: HttpContext,
-  next: () => Promise<void>,
-) => Promise<void>;
+export type Middleware = (ctx: HttpContext, next: () => Promise<void>) => Promise<void>;
 
 /**
  * HTTP 上下文接口
@@ -40,19 +37,19 @@ export type Middleware = (
  * @param error - 错误信息（可选），当请求失败时填充
  */
 export interface HttpContext {
-  request: Readonly<{
-    method: string;
-    url: string;
-    headers: Readonly<Record<string, string>>;
-    body?: unknown;
-  }>;
-  response?: Readonly<{
-    status: number;
-    headers: Readonly<Record<string, string>>;
-    data: unknown;
-  }>;
-  state: Record<string, unknown>;
-  error?: Error;
+    request: Readonly<{
+        method: string;
+        url: string;
+        headers: Readonly<Record<string, string>>;
+        body?: unknown;
+    }>;
+    response?: Readonly<{
+        status: number;
+        headers: Readonly<Record<string, string>>;
+        data: unknown;
+    }>;
+    state: Record<string, unknown>;
+    error?: Error;
 }
 
 /**
@@ -66,25 +63,25 @@ export interface HttpContext {
  * @throws 当中间件执行出错时
  */
 export async function executeMiddlewareChain(
-  ctx: HttpContext,
-  middlewares: readonly Middleware[],
-  finalHandler: () => Promise<void>,
+    ctx: HttpContext,
+    middlewares: readonly Middleware[],
+    finalHandler: () => Promise<void>
 ): Promise<void> {
-  let currentIndex = 0;
+    let currentIndex = 0;
 
-  const next = async (): Promise<void> => {
-    if (currentIndex >= middlewares.length) {
-      await finalHandler();
-      return;
-    }
-    const currentMiddleware = middlewares[currentIndex];
-    currentIndex++;
-    if (currentMiddleware) {
-      await currentMiddleware(ctx, next);
-    } else {
-      await finalHandler();
-    }
-  };
+    const next = async (): Promise<void> => {
+        if (currentIndex >= middlewares.length) {
+            await finalHandler();
+            return;
+        }
+        const currentMiddleware = middlewares[currentIndex];
+        currentIndex++;
+        if (currentMiddleware) {
+            await currentMiddleware(ctx, next);
+        } else {
+            await finalHandler();
+        }
+    };
 
-  await next();
+    await next();
 }

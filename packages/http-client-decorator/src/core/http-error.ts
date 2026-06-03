@@ -8,12 +8,12 @@
  * @param message - 错误消息
  */
 export class HttpError extends Error {
-  public constructor(
-    public readonly status: number,
-    public readonly data: unknown,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'HttpError';
-  }
+    public constructor(
+        public readonly status: number,
+        public readonly data: unknown,
+        message: string
+    ) {
+        super(message);
+        this.name = 'HttpError';
+    }
 }

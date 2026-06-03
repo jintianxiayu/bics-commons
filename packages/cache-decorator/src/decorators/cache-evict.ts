@@ -6,15 +6,15 @@ import { CacheOptions, CacheKeyResolver } from './cache';
  * @CacheEvict 装饰器配置项
  */
 export interface CacheEvictOptions extends Pick<CacheOptions, 'key'> {
-  /**
-   * 是否清除所有条目，默认为 false
-   */
-  allEntries?: boolean;
+    /**
+     * 是否清除所有条目，默认为 false
+     */
+    allEntries?: boolean;
 
-  /**
-   * 指定 CacheProvider 名称
-   */
-  providerName?: string;
+    /**
+     * 指定 CacheProvider 名称
+     */
+    providerName?: string;
 }
 
 /**
@@ -25,17 +25,17 @@ export interface CacheEvictOptions extends Pick<CacheOptions, 'key'> {
  * @returns 解析后的缓存 key
  */
 function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | undefined, args: unknown[]): string {
-  if (keyResolver === undefined || keyResolver === null) {
-    return KeyBuilder.build(cacheName, args);
-  }
-  if (typeof keyResolver === 'string') {
-    return KeyBuilder.build(cacheName, [keyResolver]);
-  }
-  try {
-    return KeyBuilder.build(cacheName, [keyResolver(...args)]);
-  } catch {
-    return KeyBuilder.build(cacheName, args);
-  }
+    if (keyResolver === undefined || keyResolver === null) {
+        return KeyBuilder.build(cacheName, args);
+    }
+    if (typeof keyResolver === 'string') {
+        return KeyBuilder.build(cacheName, [keyResolver]);
+    }
+    try {
+        return KeyBuilder.build(cacheName, [keyResolver(...args)]);
+    } catch {
+        return KeyBuilder.build(cacheName, args);
+    }
 }
 
 /**
@@ -45,29 +45,25 @@ function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | unde
  * @param options 配置项
  */
 export function CacheEvict(cacheName: string, options?: CacheEvictOptions) {
-  return function (
-    _target: object,
-    _propertyKey: string,
-    descriptor: PropertyDescriptor,
-  ) {
-    const originalMethod = descriptor.value;
+    return function (_target: object, _propertyKey: string, descriptor: PropertyDescriptor) {
+        const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: unknown[]) {
-      const result = await originalMethod.apply(this, args);
+        descriptor.value = async function (...args: unknown[]) {
+            const result = await originalMethod.apply(this, args);
 
-      const providerName = options?.providerName;
-      const provider = CacheProviderRegistry.get(providerName);
+            const providerName = options?.providerName;
+            const provider = CacheProviderRegistry.get(providerName);
 
-      if (options?.allEntries) {
-        await provider.deleteByPattern(cacheName + '*');
-      } else {
-        const cacheKey = resolveCacheKey(cacheName, options?.key, args);
-        provider.delete(cacheKey);
-      }
+            if (options?.allEntries) {
+                await provider.deleteByPattern(cacheName + '*');
+            } else {
+                const cacheKey = resolveCacheKey(cacheName, options?.key, args);
+                provider.delete(cacheKey);
+            }
 
-      return result;
+            return result;
+        };
     };
-  };
 }
 
 export { CacheProviderRegistry } from '../core/cache-provider-registry';

@@ -21,14 +21,7 @@ import { LoggerFactory } from './core/LoggerFactory';
 import { ConfigLoader } from './core/ConfigLoader';
 import { LogPosition } from './core/LogPosition';
 import { LoggerContext } from './core/LoggerContext';
-import type {
-  LoggerOptions,
-  LoggerConfig,
-  LogLevelName,
-  ConsoleConfig,
-  FileConfig,
-  ShutdownOptions,
-} from './types';
+import type { LoggerOptions, LoggerConfig, LogLevelName, ConsoleConfig, FileConfig, ShutdownOptions } from './types';
 
 /**
  * 导出 LoggerFactory、ConfigLoader、LogPosition、LoggerContext
@@ -38,14 +31,7 @@ export { LoggerFactory, ConfigLoader, LogPosition, LoggerContext };
 /**
  * 导出类型定义
  */
-export type {
-  LoggerOptions,
-  LoggerConfig,
-  LogLevelName,
-  ConsoleConfig,
-  FileConfig,
-  ShutdownOptions,
-};
+export type { LoggerOptions, LoggerConfig, LogLevelName, ConsoleConfig, FileConfig, ShutdownOptions };
 
 /**
  * 创建 Logger 实例（已弃用，请使用 LoggerFactory.getLogger）
@@ -56,6 +42,6 @@ export type {
  * @returns Logger 实例
  */
 export function createLogger(options?: { name?: string }): ReturnType<typeof LoggerFactory.getLogger> {
-  const name = options?.name || 'default';
-  return LoggerFactory.getLogger(name);
+    const name = options?.name || 'default';
+    return LoggerFactory.getLogger(name);
 }

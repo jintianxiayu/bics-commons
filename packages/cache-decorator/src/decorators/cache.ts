@@ -15,37 +15,37 @@ export type CacheKeyResolver = null | string | ((...args: unknown[]) => string);
  * @Cache 装饰器配置项
  */
 export interface CacheOptions {
-  /**
-   * 过期时间（秒）
-   */
-  ttl?: number;
+    /**
+     * 过期时间（秒）
+     */
+    ttl?: number;
 
-  /**
-   * 指定 CacheProvider 名称
-   */
-  providerName?: string;
+    /**
+     * 指定 CacheProvider 名称
+     */
+    providerName?: string;
 
-  /**
-   * 自定义缓存 key 生成逻辑
-   * - undefined/null: 使用默认逻辑 KeyBuilder.build(cacheName, args)
-   * - string: 使用 KeyBuilder.build(cacheName, [key])
-   * - function: 调用函数后使用 KeyBuilder.build(cacheName, [result])
-   */
-  key?: CacheKeyResolver;
+    /**
+     * 自定义缓存 key 生成逻辑
+     * - undefined/null: 使用默认逻辑 KeyBuilder.build(cacheName, args)
+     * - string: 使用 KeyBuilder.build(cacheName, [key])
+     * - function: 调用函数后使用 KeyBuilder.build(cacheName, [result])
+     */
+    key?: CacheKeyResolver;
 }
 
 /**
  * 成功缓存条目
  */
 interface SuccessCacheEntry<T> {
-  value: T;
+    value: T;
 }
 
 /**
  * 错误缓存条目
  */
 interface ErrorCacheEntry {
-  error: unknown;
+    error: unknown;
 }
 
 /**
@@ -63,17 +63,17 @@ const pendingCache = new PendingCache();
  * @returns 解析后的缓存 key
  */
 function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | undefined, args: unknown[]): string {
-  if (keyResolver === undefined || keyResolver === null) {
-    return KeyBuilder.build(cacheName, args);
-  }
-  if (typeof keyResolver === 'string') {
-    return KeyBuilder.build(cacheName, [keyResolver]);
-  }
-  try {
-    return KeyBuilder.build(cacheName, [keyResolver(...args)]);
-  } catch {
-    return KeyBuilder.build(cacheName, args);
-  }
+    if (keyResolver === undefined || keyResolver === null) {
+        return KeyBuilder.build(cacheName, args);
+    }
+    if (typeof keyResolver === 'string') {
+        return KeyBuilder.build(cacheName, [keyResolver]);
+    }
+    try {
+        return KeyBuilder.build(cacheName, [keyResolver(...args)]);
+    } catch {
+        return KeyBuilder.build(cacheName, args);
+    }
 }
 
 /**
@@ -83,47 +83,43 @@ function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | unde
  * @param options 配置项
  */
 export function Cache(cacheName: string, options?: CacheOptions) {
-  return function <T>(
-    _target: object,
-    _propertyKey: string,
-    descriptor: PropertyDescriptor,
-  ) {
-    const originalMethod = descriptor.value;
+    return function <T>(_target: object, _propertyKey: string, descriptor: PropertyDescriptor) {
+        const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: unknown[]) {
-      const cacheKey = resolveCacheKey(cacheName, options?.key, args);
-      const providerName = options?.providerName;
-      const provider = CacheProviderRegistry.get(providerName);
+        descriptor.value = async function (...args: unknown[]) {
+            const cacheKey = resolveCacheKey(cacheName, options?.key, args);
+            const providerName = options?.providerName;
+            const provider = CacheProviderRegistry.get(providerName);
 
-      const cached = await provider.get(cacheKey);
-      if (cached !== undefined) {
-        const entry = cached as CacheEntry<T>;
-        if ('error' in entry) {
-          throw entry.error;
-        }
-        return entry.value;
-      }
+            const cached = await provider.get(cacheKey);
+            if (cached !== undefined) {
+                const entry = cached as CacheEntry<T>;
+                if ('error' in entry) {
+                    throw entry.error;
+                }
+                return entry.value;
+            }
 
-      const pending = pendingCache.get<T>(cacheKey);
-      if (pending) {
-        return pending;
-      }
+            const pending = pendingCache.get<T>(cacheKey);
+            if (pending) {
+                return pending;
+            }
 
-      const promise = (async () => {
-        try {
-          const result = await originalMethod.apply(this, args);
-          provider.set(cacheKey, { value: result } as CacheEntry<T>, options?.ttl);
-          return result;
-        } catch (error) {
-          provider.set(cacheKey, { error } as CacheEntry<T>, options?.ttl);
-          throw error;
-        }
-      })();
+            const promise = (async () => {
+                try {
+                    const result = await originalMethod.apply(this, args);
+                    provider.set(cacheKey, { value: result } as CacheEntry<T>, options?.ttl);
+                    return result;
+                } catch (error) {
+                    provider.set(cacheKey, { error } as CacheEntry<T>, options?.ttl);
+                    throw error;
+                }
+            })();
 
-      pendingCache.set(cacheKey, promise);
-      return promise;
+            pendingCache.set(cacheKey, promise);
+            return promise;
+        };
     };
-  };
 }
 
 export { CacheProviderRegistry } from '../core/cache-provider-registry';

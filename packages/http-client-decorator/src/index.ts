@@ -11,23 +11,10 @@
 export { HttpClient, getHttpClientConfig } from './decorators/http-client';
 
 // 方法装饰器
-export {
-  Get,
-  Post,
-  Put,
-  Delete,
-  Patch,
-  getMethodMetadata,
-} from './decorators/http-methods';
+export { Get, Post, Put, Delete, Patch, getMethodMetadata } from './decorators/http-methods';
 
 // 参数装饰器
-export {
-  Path,
-  Query,
-  Body,
-  Header,
-  getParamMetadata,
-} from './decorators/params';
+export { Path, Query, Body, Header, getParamMetadata } from './decorators/params';
 
 // 类型定义
 export type { HttpClientConfig } from './core/http-client-config';

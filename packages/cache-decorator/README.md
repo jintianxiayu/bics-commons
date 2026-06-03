@@ -46,15 +46,15 @@ CacheProviderRegistry.register('memory', new MemoryCacheProvider());
 CacheProviderRegistry.setDefault('memory');
 
 class UserService {
-  @Cache('user-cache', { ttl: 60000 })
-  async getUser(id: number) {
-    return { id, name: 'test' };
-  }
+    @Cache('user-cache', { ttl: 60000 })
+    async getUser(id: number) {
+        return { id, name: 'test' };
+    }
 
-  @CacheEvict('user-cache')
-  async updateUser(id: number) {
-    return { id, updated: true };
-  }
+    @CacheEvict('user-cache')
+    async updateUser(id: number) {
+        return { id, updated: true };
+    }
 }
 ```
 
@@ -84,8 +84,6 @@ class UserService {
 }
 ```
 
-
-
 ## API
 
 ### @Cache(cacheName, options?)
@@ -96,9 +94,9 @@ class UserService {
 - `options.ttl`: 过期时间（秒）
 - `options.providerName`: 指定 CacheProvider
 - `options.key`: 自定义缓存 key，支持以下形式：
-  - `undefined/null`: 使用默认逻辑，基于方法参数生成 key
-  - `string`: 直接作为 key 值，格式为 `cacheName:keyValue`
-  - `function`: 接收方法参数数组，返回自定义字符串
+    - `undefined/null`: 使用默认逻辑，基于方法参数生成 key
+    - `string`: 直接作为 key 值，格式为 `cacheName:keyValue`
+    - `function`: 接收方法参数数组，返回自定义字符串
 
 ### @CacheEvict(cacheName, options?)
 

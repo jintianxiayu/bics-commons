@@ -10,17 +10,17 @@ const METHOD_METADATA_KEY = Symbol.for('bics:http-client:method');
  * @returns 方法装饰器工厂函数
  */
 function createMethodDecorator(method: HttpMethod) {
-  return function (path: string) {
-    return function (
-      target: object,
-      propertyKey: string | symbol,
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      _descriptor: PropertyDescriptor,
-    ): void {
-      const metadata: MethodMetadata = { method, path };
-      Reflect.defineMetadata(METHOD_METADATA_KEY, metadata, target, propertyKey);
+    return function (path: string) {
+        return function (
+            target: object,
+            propertyKey: string | symbol,
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            _descriptor: PropertyDescriptor
+        ): void {
+            const metadata: MethodMetadata = { method, path };
+            Reflect.defineMetadata(METHOD_METADATA_KEY, metadata, target, propertyKey);
+        };
     };
-  };
 }
 
 /**
@@ -51,11 +51,6 @@ export const Patch = createMethodDecorator('PATCH');
  * @param propertyKey - 方法属性名
  * @returns 方法元数据（如果存在）
  */
-export function getMethodMetadata(
-  target: object,
-  propertyKey: string | symbol,
-): MethodMetadata | undefined {
-  return Reflect.getMetadata(METHOD_METADATA_KEY, target, propertyKey) as
-    | MethodMetadata
-    | undefined;
+export function getMethodMetadata(target: object, propertyKey: string | symbol): MethodMetadata | undefined {
+    return Reflect.getMetadata(METHOD_METADATA_KEY, target, propertyKey) as MethodMetadata | undefined;
 }

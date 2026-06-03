@@ -13,23 +13,19 @@ const HTTP_CLIENT_CONFIG_KEY = Symbol.for('bics:http-client:config');
  * @returns 类装饰器
  */
 export function HttpClient(config: HttpClientConfig) {
-  return function <T extends new (...args: unknown[]) => object>(
-    Target: T,
-  ): T {
-    Reflect.defineMetadata(HTTP_CLIENT_CONFIG_KEY, config, Target);
+    return function <T extends new (...args: unknown[]) => object>(Target: T): T {
+        Reflect.defineMetadata(HTTP_CLIENT_CONFIG_KEY, config, Target);
 
-    const DecoratedConstructor = function (
-      ...args: unknown[]
-    ): object {
-      const instance = new Target(...args);
-      return createProxyInstance(instance, config);
-    } as unknown as T;
+        const DecoratedConstructor = function (...args: unknown[]): object {
+            const instance = new Target(...args);
+            return createProxyInstance(instance, config);
+        } as unknown as T;
 
-    DecoratedConstructor.prototype = Target.prototype;
-    Object.setPrototypeOf(DecoratedConstructor, Target);
+        DecoratedConstructor.prototype = Target.prototype;
+        Object.setPrototypeOf(DecoratedConstructor, Target);
 
-    return DecoratedConstructor;
-  };
+        return DecoratedConstructor;
+    };
 }
 
 /**
@@ -38,10 +34,6 @@ export function HttpClient(config: HttpClientConfig) {
  * @param target - 目标类
  * @returns HTTP 客户端配置（如果存在）
  */
-export function getHttpClientConfig(
-  target: object,
-): HttpClientConfig | undefined {
-  return Reflect.getMetadata(HTTP_CLIENT_CONFIG_KEY, target) as
-    | HttpClientConfig
-    | undefined;
+export function getHttpClientConfig(target: object): HttpClientConfig | undefined {
+    return Reflect.getMetadata(HTTP_CLIENT_CONFIG_KEY, target) as HttpClientConfig | undefined;
 }

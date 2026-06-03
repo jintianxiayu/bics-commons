@@ -16,19 +16,16 @@ import type { HttpContext, Middleware } from './middleware';
  * @param config - HTTP 客户端配置
  * @returns 代理包装后的实例
  */
-export function createProxyInstance<T extends object>(
-  target: T,
-  config: HttpClientConfig,
-): T {
-  return new Proxy(target, {
-    get(_targetProxy, prop, receiver) {
-      const methodMeta = getMethodMetadata(target, prop);
-      if (methodMeta) {
-        return createHttpMethod(target, prop as string, methodMeta, config);
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+export function createProxyInstance<T extends object>(target: T, config: HttpClientConfig): T {
+    return new Proxy(target, {
+        get(_targetProxy, prop, receiver) {
+            const methodMeta = getMethodMetadata(target, prop);
+            if (methodMeta) {
+                return createHttpMethod(target, prop as string, methodMeta, config);
+            }
+            return Reflect.get(target, prop, receiver);
+        },
+    });
 }
 
 /**
@@ -43,41 +40,36 @@ export function createProxyInstance<T extends object>(
  * @returns 异步方法函数
  */
 function createHttpMethod(
-  instanceTarget: object,
-  propertyKey: string,
-  methodMeta: MethodMetadata,
-  config: HttpClientConfig,
+    instanceTarget: object,
+    propertyKey: string,
+    methodMeta: MethodMetadata,
+    config: HttpClientConfig
 ): (...args: unknown[]) => Promise<unknown> {
-  return async function (...args: unknown[]): Promise<unknown> {
-    const paramMeta = getParamMetadata(instanceTarget, propertyKey);
-    const { url, body, headers } = buildRequestParts(
-      paramMeta,
-      args,
-      methodMeta,
-      config,
-    );
+    return async function (...args: unknown[]): Promise<unknown> {
+        const paramMeta = getParamMetadata(instanceTarget, propertyKey);
+        const { url, body, headers } = buildRequestParts(paramMeta, args, methodMeta, config);
 
-    const middlewares: Middleware[] = config.middlewares ?? [];
-    const httpClient = createHttpRequest(config);
+        const middlewares: Middleware[] = config.middlewares ?? [];
+        const httpClient = createHttpRequest(config);
 
-    const ctx: HttpContext = {
-      request: {
-        method: methodMeta.method,
-        url,
-        headers,
-        body,
-      },
-      state: {},
+        const ctx: HttpContext = {
+            request: {
+                method: methodMeta.method,
+                url,
+                headers,
+                body,
+            },
+            state: {},
+        };
+
+        const handler = async (): Promise<void> => {
+            const result = await httpClient(ctx.request);
+            ctx.response = result;
+        };
+
+        await executeMiddlewareChain(ctx, middlewares, handler);
+        return ctx.response?.data;
     };
-
-    const handler = async (): Promise<void> => {
-      const result = await httpClient(ctx.request);
-      ctx.response = result;
-    };
-
-    await executeMiddlewareChain(ctx, middlewares, handler);
-    return ctx.response?.data;
-  };
 }
 
 /**
@@ -92,40 +84,40 @@ function createHttpMethod(
  * @returns 请求的各部分数据
  */
 function buildRequestParts(
-  paramMeta: ParamMetadata[],
-  args: unknown[],
-  methodMeta: MethodMetadata,
-  config: HttpClientConfig,
+    paramMeta: ParamMetadata[],
+    args: unknown[],
+    methodMeta: MethodMetadata,
+    config: HttpClientConfig
 ): { url: string; body?: unknown; headers: Record<string, string> } {
-  let path = methodMeta.path;
-  const query: Record<string, string> = {};
-  let body: unknown;
-  const headers: Record<string, string> = { ...config.headers };
+    let path = methodMeta.path;
+    const query: Record<string, string> = {};
+    let body: unknown;
+    const headers: Record<string, string> = { ...config.headers };
 
-  for (const param of paramMeta) {
-    const value = args[param.paramIndex];
-    switch (param.paramType) {
-      case 'path':
-        path = path.replace(`:${param.paramName}`, String(value));
-        break;
-      case 'query':
-        if (param.paramName && value !== undefined) {
-          query[param.paramName] = String(value);
+    for (const param of paramMeta) {
+        const value = args[param.paramIndex];
+        switch (param.paramType) {
+            case 'path':
+                path = path.replace(`:${param.paramName}`, String(value));
+                break;
+            case 'query':
+                if (param.paramName && value !== undefined) {
+                    query[param.paramName] = String(value);
+                }
+                break;
+            case 'body':
+                body = value;
+                break;
+            case 'header':
+                if (param.paramName && value !== undefined) {
+                    headers[param.paramName] = String(value);
+                }
+                break;
         }
-        break;
-      case 'body':
-        body = value;
-        break;
-      case 'header':
-        if (param.paramName && value !== undefined) {
-          headers[param.paramName] = String(value);
-        }
-        break;
     }
-  }
 
-  const url = buildUrl(config.baseURL, path, query);
-  return { url, body, headers };
+    const url = buildUrl(config.baseURL, path, query);
+    return { url, body, headers };
 }
 
 /**
@@ -138,14 +130,10 @@ function buildRequestParts(
  * @param query - 查询参数对象
  * @returns 完整的 URL 字符串
  */
-function buildUrl(
-  baseURL: string,
-  path: string,
-  query: Record<string, string>,
-): string {
-  const url = new URL(path, baseURL);
-  for (const [key, value] of Object.entries(query)) {
-    url.searchParams.set(key, value);
-  }
-  return url.toString();
+function buildUrl(baseURL: string, path: string, query: Record<string, string>): string {
+    const url = new URL(path, baseURL);
+    for (const [key, value] of Object.entries(query)) {
+        url.searchParams.set(key, value);
+    }
+    return url.toString();
 }

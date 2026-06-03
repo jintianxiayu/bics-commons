@@ -12,6 +12,6 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
  * @param path - 请求路径
  */
 export interface MethodMetadata {
-  method: HttpMethod;
-  path: string;
+    method: HttpMethod;
+    path: string;
 }

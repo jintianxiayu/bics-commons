@@ -13,7 +13,7 @@ export type ParamType = 'path' | 'query' | 'body' | 'header';
  * @param paramName - 参数名称（用于 path、query、header 类型）
  */
 export interface ParamMetadata {
-  paramIndex: number;
-  paramType: ParamType;
-  paramName?: string;
+    paramIndex: number;
+    paramType: ParamType;
+    paramName?: string;
 }

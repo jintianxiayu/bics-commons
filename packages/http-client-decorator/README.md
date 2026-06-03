@@ -22,41 +22,27 @@ npm install @jintianxiayu/http-client-decorator
 ### 定义 HTTP 客户端
 
 ```typescript
-import {
-  HttpClient,
-  Get,
-  Post,
-  Path,
-  Query,
-  Body,
-  Header,
-} from '@jintianxiayu/http-client-decorator';
+import { HttpClient, Get, Post, Path, Query, Body, Header } from '@jintianxiayu/http-client-decorator';
 
 @HttpClient({
-  baseURL: 'https://api.example.com',
+    baseURL: 'https://api.example.com',
 })
 class UserService {
-  @Get('/users/:id')
-  getUser(
-    @Path('id') id: string,
-    @Header('Authorization') token: string
-  ): Promise<User> {
-    // 实际不会调用，仅用于类型标注
-    return Promise.resolve({} as User);
-  }
+    @Get('/users/:id')
+    getUser(@Path('id') id: string, @Header('Authorization') token: string): Promise<User> {
+        // 实际不会调用，仅用于类型标注
+        return Promise.resolve({} as User);
+    }
 
-  @Post('/users')
-  createUser(@Body() dto: CreateUserDto): Promise<User> {
-    return Promise.resolve({} as User);
-  }
+    @Post('/users')
+    createUser(@Body() dto: CreateUserDto): Promise<User> {
+        return Promise.resolve({} as User);
+    }
 
-  @Get('/users')
-  listUsers(
-    @Query('page') page: string,
-    @Query('size') size: string
-  ): Promise<User[]> {
-    return Promise.resolve([] as User[]);
-  }
+    @Get('/users')
+    listUsers(@Query('page') page: string, @Query('size') size: string): Promise<User[]> {
+        return Promise.resolve([] as User[]);
+    }
 }
 ```
 
@@ -83,13 +69,13 @@ const users = await userService.listUsers('1', '10');
 import type { Middleware, HttpContext } from '@jintianxiayu/http-client-decorator';
 
 const authMiddleware: Middleware = async (ctx: HttpContext, next) => {
-  // 请求前处理
-  ctx.request.headers['Authorization'] = `Bearer ${getToken()}`;
+    // 请求前处理
+    ctx.request.headers['Authorization'] = `Bearer ${getToken()}`;
 
-  await next(); // 调用下一个中间件
+    await next(); // 调用下一个中间件
 
-  // 响应后处理
-  console.log(`Response status: ${ctx.response?.status}`);
+    // 响应后处理
+    console.log(`Response status: ${ctx.response?.status}`);
 };
 ```
 
@@ -107,8 +93,8 @@ const authMiddleware: Middleware = async (ctx: HttpContext, next) => {
 
 ```typescript
 @HttpClient({
-  baseURL: 'https://api.example.com',
-  middlewares: [authMiddleware, logMiddleware],
+    baseURL: 'https://api.example.com',
+    middlewares: [authMiddleware, logMiddleware],
 })
 class UserService {}
 ```
@@ -121,12 +107,12 @@ HTTP 4xx/5xx 响应会抛出 `HttpError` 异常：
 import { HttpError } from '@jintianxiayu/http-client-decorator';
 
 try {
-  await userService.getUser('not-found');
+    await userService.getUser('not-found');
 } catch (e) {
-  if (e instanceof HttpError) {
-    console.error(`HTTP ${e.status}: ${e.message}`);
-    console.error('Response data:', e.data);
-  }
+    if (e instanceof HttpError) {
+        console.error(`HTTP ${e.status}: ${e.message}`);
+        console.error('Response data:', e.data);
+    }
 }
 ```
 
@@ -157,42 +143,39 @@ try {
 
 ```typescript
 interface HttpClientConfig {
-  baseURL: string;
-  middlewares?: Middleware[];
-  timeout?: number;
-  headers?: Record<string, string>;
+    baseURL: string;
+    middlewares?: Middleware[];
+    timeout?: number;
+    headers?: Record<string, string>;
 }
 
 interface HttpContext {
-  request: {
-    method: string;
-    url: string;
-    headers: Record<string, string>;
-    body?: unknown;
-  };
-  response?: {
-    status: number;
-    headers: Record<string, string>;
-    data: unknown;
-  };
-  state: Record<string, unknown>;
-  error?: Error;
+    request: {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+        body?: unknown;
+    };
+    response?: {
+        status: number;
+        headers: Record<string, string>;
+        data: unknown;
+    };
+    state: Record<string, unknown>;
+    error?: Error;
 }
 
-type Middleware = (
-  ctx: HttpContext,
-  next: () => Promise<void>
-) => Promise<void>;
+type Middleware = (ctx: HttpContext, next: () => Promise<void>) => Promise<void>;
 
 class HttpError extends Error {
-  constructor(
-    public status: number,
-    public data: unknown,
-    message: string
-  ) {
-    super(message);
-    this.name = 'HttpError';
-  }
+    constructor(
+        public status: number,
+        public data: unknown,
+        message: string
+    ) {
+        super(message);
+        this.name = 'HttpError';
+    }
 }
 ```
 

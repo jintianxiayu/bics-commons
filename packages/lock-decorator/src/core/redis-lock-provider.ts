@@ -25,24 +25,24 @@ end
  * 使用 SET NX PX 原子设锁，Lua 脚本保证原子操作
  */
 export class RedisLockProvider implements LockProvider {
-  constructor(private client: Redis) {}
+    constructor(private client: Redis) {}
 
-  /** @inheritdoc */
-  async acquire(key: string, ttl: number): Promise<string | null> {
-    const token = uuidv4();
-    const result = await this.client.set(key, token, 'PX', ttl, 'NX');
-    return result === 'OK' ? token : null;
-  }
+    /** @inheritdoc */
+    async acquire(key: string, ttl: number): Promise<string | null> {
+        const token = uuidv4();
+        const result = await this.client.set(key, token, 'PX', ttl, 'NX');
+        return result === 'OK' ? token : null;
+    }
 
-  /** @inheritdoc */
-  async release(key: string, token: string): Promise<boolean> {
-    const result = await this.client.eval(RELEASE_SCRIPT, 1, key, token);
-    return result === 1;
-  }
+    /** @inheritdoc */
+    async release(key: string, token: string): Promise<boolean> {
+        const result = await this.client.eval(RELEASE_SCRIPT, 1, key, token);
+        return result === 1;
+    }
 
-  /** @inheritdoc */
-  async renew(key: string, token: string, ttl: number): Promise<boolean> {
-    const result = await this.client.eval(RENEW_SCRIPT, 1, key, token, ttl);
-    return result === 1;
-  }
+    /** @inheritdoc */
+    async renew(key: string, token: string, ttl: number): Promise<boolean> {
+        const result = await this.client.eval(RENEW_SCRIPT, 1, key, token, ttl);
+        return result === 1;
+    }
 }

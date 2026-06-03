@@ -35,11 +35,11 @@ LockProviderRegistry.register('redis', new RedisLockProvider(redis));
 LockProviderRegistry.setDefault('redis');
 
 class OrderService {
-  @DistributedLock({ key: 'daily-settlement', ttl: 60000 })
-  async dailySettlement() {
-    // 业务逻辑
-    return { success: true };
-  }
+    @DistributedLock({ key: 'daily-settlement', ttl: 60000 })
+    async dailySettlement() {
+        // 业务逻辑
+        return { success: true };
+    }
 }
 ```
 
@@ -55,11 +55,11 @@ LockProviderRegistry.register('redis', new RedisLockProvider(new Redis()));
 LockProviderRegistry.setDefault('redis');
 
 class PaymentService {
-  @DistributedLock({})
-  async processPayment(orderId: string, amount: number) {
-    // 自动使用 'PaymentService.processPayment' 作为锁 key
-    return { orderId, status: 'paid' };
-  }
+    @DistributedLock({})
+    async processPayment(orderId: string, amount: number) {
+        // 自动使用 'PaymentService.processPayment' 作为锁 key
+        return { orderId, status: 'paid' };
+    }
 }
 ```
 
@@ -67,13 +67,13 @@ class PaymentService {
 
 ```typescript
 class InventoryService {
-  @DistributedLock({
-    ttl: 30000,           // 锁超时 30 秒
-    renewInterval: 10000, // 每 10 秒续期一次
-  })
-  async deductStock(productId: string, quantity: number) {
-    return { productId, remaining: 100 - quantity };
-  }
+    @DistributedLock({
+        ttl: 30000, // 锁超时 30 秒
+        renewInterval: 10000, // 每 10 秒续期一次
+    })
+    async deductStock(productId: string, quantity: number) {
+        return { productId, remaining: 100 - quantity };
+    }
 }
 ```
 
@@ -81,14 +81,14 @@ class InventoryService {
 
 ```typescript
 class LockService {
-  @DistributedLock({
-    key: 'critical-section',
-    retryCount: 3,     // 最多重试 3 次
-    retryDelay: 200,   // 重试间隔 200ms
-  })
-  async criticalOperation() {
-    return 'done';
-  }
+    @DistributedLock({
+        key: 'critical-section',
+        retryCount: 3, // 最多重试 3 次
+        retryDelay: 200, // 重试间隔 200ms
+    })
+    async criticalOperation() {
+        return 'done';
+    }
 }
 ```
 
@@ -96,12 +96,12 @@ class LockService {
 
 ```typescript
 class OrderService {
-  @DistributedLock({
-    key: (orderId: string) => `order:${orderId}`,
-  })
-  async processOrder(orderId: string) {
-    return { orderId, status: 'processed' };
-  }
+    @DistributedLock({
+        key: (orderId: string) => `order:${orderId}`,
+    })
+    async processOrder(orderId: string) {
+        return { orderId, status: 'processed' };
+    }
 }
 ```
 
@@ -109,23 +109,23 @@ class OrderService {
 
 ```typescript
 class StockService {
-  @DistributedLock({
-    key: (productId: string) => `stock:${productId}`,
-    retryCount: 2,
-  })
-  async deductStock(productId: string, quantity: number) {
-    return { productId, remaining: 100 - quantity };
-  }
+    @DistributedLock({
+        key: (productId: string) => `stock:${productId}`,
+        retryCount: 2,
+    })
+    async deductStock(productId: string, quantity: number) {
+        return { productId, remaining: 100 - quantity };
+    }
 }
 
 const stockService = new StockService();
 try {
-  await stockService.deductStock('P001', 5);
+    await stockService.deductStock('P001', 5);
 } catch (error) {
-  if (error instanceof LockAcquisitionError) {
-    console.error(`获取锁失败: ${error.key}, 重试次数: ${error.retryCount}`);
-  }
-  throw error;
+    if (error instanceof LockAcquisitionError) {
+        console.error(`获取锁失败: ${error.key}, 重试次数: ${error.retryCount}`);
+    }
+    throw error;
 }
 ```
 
@@ -137,21 +137,21 @@ try {
 
 ```typescript
 interface DistributedLockOptions {
-  key?: null | string | ((...args: unknown[]) => string);
-  ttl?: number;              // 默认 30000ms
-  renewInterval?: number;    // 默认 10000ms
-  retryCount?: number;      // 默认 0（不重试）
-  retryDelay?: number;      // 默认 100ms
+    key?: null | string | ((...args: unknown[]) => string);
+    ttl?: number; // 默认 30000ms
+    renewInterval?: number; // 默认 10000ms
+    retryCount?: number; // 默认 0（不重试）
+    retryDelay?: number; // 默认 100ms
 }
 ```
 
 #### key 选项
 
-| 形式 | 说明 | 示例 |
-|------|------|------|
-| `undefined`/`null` | 方法级锁，格式 `ClassName.methodName` | `'PaymentService.processPayment'` |
-| `string` | 指定字符串锁 key | `'daily-settlement'` |
-| `function` | 动态计算，参数为方法入参 | `(orderId: string) => \`order:${orderId}\`` |
+| 形式               | 说明                                  | 示例                                        |
+| ------------------ | ------------------------------------- | ------------------------------------------- |
+| `undefined`/`null` | 方法级锁，格式 `ClassName.methodName` | `'PaymentService.processPayment'`           |
+| `string`           | 指定字符串锁 key                      | `'daily-settlement'`                        |
+| `function`         | 动态计算，参数为方法入参              | `(orderId: string) => \`order:${orderId}\`` |
 
 ### LockProviderRegistry
 
@@ -192,10 +192,10 @@ const lockProvider = new RedisLockProvider(redis);
 
 **Redis 操作：**
 
-| 操作 | 实现方式 |
-|------|---------|
-| 加锁 | `SET key token NX PX ttl` 原子设锁 |
-| 释放 | Lua 脚本：校验 token 后 DEL（原子操作） |
+| 操作 | 实现方式                                    |
+| ---- | ------------------------------------------- |
+| 加锁 | `SET key token NX PX ttl` 原子设锁          |
+| 释放 | Lua 脚本：校验 token 后 DEL（原子操作）     |
 | 续期 | Lua 脚本：校验 token 后 PEXPIRE（原子操作） |
 
 ### LockAcquisitionError
@@ -206,11 +206,11 @@ const lockProvider = new RedisLockProvider(redis);
 import { LockAcquisitionError } from '@jintianxiayu/lock-decorator';
 
 try {
-  await service.criticalOperation();
+    await service.criticalOperation();
 } catch (error) {
-  if (error instanceof LockAcquisitionError) {
-    console.error(`锁 key: ${error.key}, 重试次数: ${error.retryCount}`);
-  }
+    if (error instanceof LockAcquisitionError) {
+        console.error(`锁 key: ${error.key}, 重试次数: ${error.retryCount}`);
+    }
 }
 ```
 
@@ -222,15 +222,15 @@ try {
 import { Watchdog } from '@jintianxiayu/lock-decorator';
 
 const watchdog = new Watchdog({
-  provider,
-  key: 'lock-key',
-  token: 'token',
-  ttl: 30000,
-  interval: 10000,
+    provider,
+    key: 'lock-key',
+    token: 'token',
+    ttl: 30000,
+    interval: 10000,
 });
 watchdog.start(); // 开始续期
 // 业务执行...
-watchdog.stop();  // 停止续期
+watchdog.stop(); // 停止续期
 ```
 
 ## 项目结构

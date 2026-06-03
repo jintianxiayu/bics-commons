@@ -11,8 +11,8 @@ import type { Middleware } from './middleware';
  * @param headers - 默认请求头
  */
 export interface HttpClientConfig {
-  baseURL: string;
-  middlewares?: Middleware[];
-  timeout?: number;
-  headers?: Record<string, string>;
+    baseURL: string;
+    middlewares?: Middleware[];
+    timeout?: number;
+    headers?: Record<string, string>;
 }
