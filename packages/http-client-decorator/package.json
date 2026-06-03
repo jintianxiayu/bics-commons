@@ -1,6 +1,6 @@
 {
     "name": "@jintianxiayu/http-client-decorator",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Decorator-based HTTP client framework providing RPC-like calling experience",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -21,7 +21,7 @@
         "@jintianxiayu/logger": "*"
     },
     "devDependencies": {
-        "@jintianxiayu/logger": "^0.1.2",
+        "@jintianxiayu/logger": "^0.1.3",
         "axios-mock-adapter": "^2.1.0",
         "ts-jest": "^29.2.5"
     },
