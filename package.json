@@ -11,7 +11,8 @@
     "dev": "echo \"Use lerna run dev to run dev in all packages\"",
     "format": "prettier --write \"packages/**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,js,json,md}\"",
-    "lint": "eslint packages --ext .ts"
+    "lint": "eslint packages --ext .ts",
+    "publish": "lerna publish"
   },
   "devDependencies": {
     "jest": "^29.7.0",
