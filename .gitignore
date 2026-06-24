@@ -9,3 +9,4 @@ coverage/
 .vscode/
 .claude/settings.local.json
 .codegraph/
+.claude/

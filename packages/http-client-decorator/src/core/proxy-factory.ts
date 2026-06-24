@@ -131,7 +131,9 @@ function buildRequestParts(
  * @returns 完整的 URL 字符串
  */
 function buildUrl(baseURL: string, path: string, query: Record<string, string>): string {
-    const url = new URL(path, baseURL);
+    const base = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL;
+    const suffix = path.startsWith('/') ? path : `/${path}`;
+    const url = new URL(`${base}${suffix}`);
     for (const [key, value] of Object.entries(query)) {
         url.searchParams.set(key, value);
     }
