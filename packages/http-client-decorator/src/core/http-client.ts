@@ -1,14 +1,12 @@
 import axios, { type AxiosRequestConfig, AxiosError } from 'axios';
 import { HttpError } from './http-error';
 import type { HttpContext } from './middleware';
-import { LoggerFactory } from '@jintianxiayu/logger';
-
-const logger = LoggerFactory.getLogger('@jintianxiayu/http-client-decorator');
 
 /**
  * 创建 HTTP 请求函数
  *
- * 根据配置创建发送 HTTP 请求的函数，内部处理错误转换和日志记录
+ * 根据配置创建发送 HTTP 请求的函数，内部处理错误转换。
+ * 调试日志由外层 debug middleware 负责输出。
  *
  * @param config - HTTP 客户端配置
  * @returns 发送请求的函数
@@ -28,8 +26,6 @@ export function createHttpRequest(
             validateStatus: () => true,
         };
 
-        logger.debug(`HTTP ${request.method} ${request.url}`);
-
         try {
             const response = await axios(axiosConfig);
 
@@ -43,8 +39,6 @@ export function createHttpRequest(
                     responseHeaders[key] = value;
                 }
             }
-
-            logger.debug(`HTTP ${response.status} ${request.url}`);
 
             return {
                 status: response.status,

@@ -17,11 +17,15 @@ export { Get, Post, Put, Delete, Patch, getMethodMetadata } from './decorators/h
 export { Path, Query, Body, Header, getParamMetadata } from './decorators/params';
 
 // 类型定义
-export type { HttpClientConfig } from './core/http-client-config';
+export type { HttpClientConfig, TracingOptions, DebugOptions } from './core/http-client-config';
 export type { HttpContext } from './core/middleware';
 export type { Middleware } from './core/middleware';
 export type { MethodMetadata, HttpMethod } from './core/method-metadata';
 export type { ParamMetadata, ParamType } from './core/param-metadata';
+
+// 内置中间件工厂（可独立复用）
+export { createTracingMiddleware } from './middlewares/tracing';
+export { createDebugMiddleware } from './middlewares/debug';
 
 // 错误类
 export { HttpError } from './core/http-error';

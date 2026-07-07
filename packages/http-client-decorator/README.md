@@ -9,6 +9,8 @@
 - 支持 `@Path`、`@Query`、`@Body`、`@Header` 参数装饰器
 - Koa 风格洋葱模型中间件机制
 - HTTP 4xx/5xx 错误自动抛出 `HttpError` 异常
+- 内置 `tracing` 支持：自动注入 traceId 到请求头（与 `@jintianxiayu/logger` 的 `LoggerContext` 集成）
+- 内置 `debug` 支持：一行配置开启完整的请求/响应日志输出
 - 底层使用 axios，支持所有 axios 特性
 
 ## 安装
@@ -99,6 +101,96 @@ const authMiddleware: Middleware = async (ctx: HttpContext, next) => {
 class UserService {}
 ```
 
+## 内置功能
+
+### tracing — 自动注入 traceId
+
+自动从 [`LoggerContext`](../logger/README.md#tracecontext---traceid-追踪) 读取 `traceId`，并注入到每次请求的指定 header 中。
+
+```typescript
+import { LoggerContext } from '@jintianxiayu/logger';
+
+// 在请求链路入口设置 traceId（如 Koa/Express 中间件）
+LoggerContext.set('traceId', 'req-abc-123');
+
+@HttpClient({
+    baseURL: 'https://api.example.com',
+    tracing: true,  // 默认注入到 x-trace-id header
+})
+class UserService {
+    @Get('/users/:id')
+    getUser(@Path('id') id: string): Promise<User> {
+        return Promise.resolve({} as User);
+    }
+}
+// 每次请求自动携带 x-trace-id: req-abc-123
+```
+
+**自定义配置：**
+
+```typescript
+@HttpClient({
+    baseURL: 'https://api.example.com',
+    tracing: {
+        headerName: 'x-request-id',              // 自定义 header 名称
+        provider: () => myStore.getTraceId(),     // 自定义 traceId 来源
+    },
+})
+class UserService {}
+```
+
+`provider` 返回 `undefined` 时自动跳过注入，不会产生空 header。
+
+---
+
+### debug — 请求/响应详情输出
+
+开启后输出完整的请求 URL、headers、body 及响应 status、headers、body、耗时。
+
+```typescript
+@HttpClient({
+    baseURL: 'https://api.example.com',
+    debug: true,  // 使用包内 Logger 输出
+})
+class UserService {}
+```
+
+**输出示例（text 格式）：**
+
+```
+DEBUG [@jintianxiayu/http-client-decorator] HTTP Request {"method":"GET","url":"https://api.example.com/users/1","headers":{"x-trace-id":"abc-123"}}
+DEBUG [@jintianxiayu/http-client-decorator] HTTP Response {"method":"GET","url":"https://api.example.com/users/1","status":200,"body":{...},"duration":142}
+```
+
+**自定义配置：**
+
+```typescript
+@HttpClient({
+    baseURL: 'https://api.example.com',
+    debug: {
+        logBody: false,     // 不输出 body（适合含敏感信息的接口）
+        logHeaders: false,  // 不输出 headers
+        logger: (msg, meta) => console.log(msg, meta),  // 自定义输出函数
+    },
+})
+class UserService {}
+```
+
+> **提示**：`debug: true` 在生产环境可能输出敏感信息（如 Authorization header、请求体中的密码字段），建议配合 `logBody: false` / `logHeaders: false` 使用，或仅在开发/测试环境开启。
+
+内置 middleware 也可独立导出用于非装饰器场景：
+
+```typescript
+import { createTracingMiddleware, createDebugMiddleware } from '@jintianxiayu/http-client-decorator';
+
+const middlewares = [
+    createTracingMiddleware({ headerName: 'x-trace-id' }),
+    createDebugMiddleware({ logBody: false }),
+];
+```
+
+---
+
 ## 错误处理
 
 HTTP 4xx/5xx 响应会抛出 `HttpError` 异常：
@@ -147,6 +239,19 @@ interface HttpClientConfig {
     middlewares?: Middleware[];
     timeout?: number;
     headers?: Record<string, string>;
+    tracing?: boolean | TracingOptions;
+    debug?: boolean | DebugOptions;
+}
+
+interface TracingOptions {
+    headerName?: string;                    // 默认 'x-trace-id'
+    provider?: () => string | undefined;    // 默认从 LoggerContext.get('traceId') 读取
+}
+
+interface DebugOptions {
+    logger?: (message: string, meta?: Record<string, unknown>) => void;
+    logBody?: boolean;     // 默认 true
+    logHeaders?: boolean;  // 默认 true
 }
 
 interface HttpContext {

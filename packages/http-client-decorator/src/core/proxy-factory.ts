@@ -2,10 +2,12 @@ import type { ParamMetadata } from './param-metadata';
 import type { MethodMetadata } from './method-metadata';
 import { getMethodMetadata } from '../decorators/http-methods';
 import { getParamMetadata } from '../decorators/params';
-import type { HttpClientConfig } from './http-client-config';
+import type { HttpClientConfig, TracingOptions, DebugOptions } from './http-client-config';
 import { createHttpRequest } from './http-client';
 import { executeMiddlewareChain } from './middleware';
 import type { HttpContext, Middleware } from './middleware';
+import { createTracingMiddleware } from '../middlewares/tracing';
+import { createDebugMiddleware } from '../middlewares/debug';
 
 /**
  * 创建代理实例
@@ -49,7 +51,8 @@ function createHttpMethod(
         const paramMeta = getParamMetadata(instanceTarget, propertyKey);
         const { url, body, headers } = buildRequestParts(paramMeta, args, methodMeta, config);
 
-        const middlewares: Middleware[] = config.middlewares ?? [];
+        const builtinMiddlewares: Middleware[] = buildBuiltinMiddlewares(config);
+        const middlewares: Middleware[] = [...builtinMiddlewares, ...(config.middlewares ?? [])];
         const httpClient = createHttpRequest(config);
 
         const ctx: HttpContext = {
@@ -138,4 +141,28 @@ function buildUrl(baseURL: string, path: string, query: Record<string, string>):
         url.searchParams.set(key, value);
     }
     return url.toString();
+}
+
+/**
+ * 根据配置构建内置中间件列表
+ *
+ * 执行顺序：tracing → debug → user middlewares
+ *
+ * @param config - HTTP 客户端配置
+ * @returns 内置中间件数组
+ */
+function buildBuiltinMiddlewares(config: HttpClientConfig): Middleware[] {
+    const middlewares: Middleware[] = [];
+
+    if (config.tracing !== undefined && config.tracing !== false) {
+        const opts: TracingOptions = config.tracing === true ? {} : config.tracing;
+        middlewares.push(createTracingMiddleware(opts));
+    }
+
+    if (config.debug !== undefined && config.debug !== false) {
+        const opts: DebugOptions = config.debug === true ? {} : config.debug;
+        middlewares.push(createDebugMiddleware(opts));
+    }
+
+    return middlewares;
 }
