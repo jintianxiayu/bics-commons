@@ -1,6 +1,6 @@
 {
     "name": "@jintianxiayu/http-client-decorator",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "description": "Decorator-based HTTP client framework providing RPC-like calling experience",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
