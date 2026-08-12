@@ -1,9 +1,16 @@
 import type winston from 'winston';
 import { createPatternFormatter } from '../src/formatters/PatternFormatter';
+import { LoggerContext } from '../src/core/LoggerContext';
+import { LOG_CONTEXT_SYMBOL } from '../src/core/LogContextMetadata';
 import { LogPosition } from '../src/core/LogPosition';
 import { LOG_POSITION_SYMBOL } from '../src/core/LogPositionMetadata';
 
 describe('PatternFormatter', () => {
+    afterEach(() => {
+        LoggerContext.clear();
+        jest.restoreAllMocks();
+    });
+
     it('uses safe stringify for unexpected unsafe meta values', () => {
         const format = createPatternFormatter('%{level} %{message} %{meta}');
         const info = {
@@ -117,5 +124,54 @@ describe('PatternFormatter', () => {
         expect(transformed[Symbol.for('message')]).toBe('event unknown:0:0');
         expect(capture).toHaveBeenCalledTimes(1);
         capture.mockRestore();
+    });
+
+    it('reuses a pre-captured traceId for repeated placeholders', () => {
+        const get = jest.spyOn(LoggerContext, 'get');
+        const format = createPatternFormatter('%{traceId} %{message} %{traceId}');
+        const info = {
+            level: 'info',
+            message: 'event',
+            timestamp: '2026-08-13T00:00:00.000Z',
+            [LOG_CONTEXT_SYMBOL]: { captured: true, traceId: 'captured-trace' },
+        } as unknown as winston.Logform.TransformableInfo;
+
+        const transformed = format.transform(info) as winston.Logform.TransformableInfo;
+
+        expect(transformed[Symbol.for('message')]).toBe('captured-trace event captured-trace');
+        expect(get).not.toHaveBeenCalled();
+    });
+
+    it('keeps an intentionally missing pre-captured traceId', () => {
+        const format = createPatternFormatter('%{traceId} %{message}');
+        const info = {
+            level: 'info',
+            message: 'event',
+            timestamp: '2026-08-13T00:00:00.000Z',
+            [LOG_CONTEXT_SYMBOL]: { captured: true },
+        } as unknown as winston.Logform.TransformableInfo;
+
+        const output = LoggerContext.withContext({ traceId: 'formatter-trace' }, () => {
+            const transformed = format.transform(info) as winston.Logform.TransformableInfo;
+            return transformed[Symbol.for('message')];
+        });
+
+        expect(output).toBe('- event');
+    });
+
+    it('falls back to the active context when used independently', () => {
+        const format = createPatternFormatter('%{traceId} %{message}');
+        const info = {
+            level: 'info',
+            message: 'event',
+            timestamp: '2026-08-13T00:00:00.000Z',
+        } as unknown as winston.Logform.TransformableInfo;
+
+        const output = LoggerContext.withContext({ traceId: 'active-trace' }, () => {
+            const transformed = format.transform(info) as winston.Logform.TransformableInfo;
+            return transformed[Symbol.for('message')];
+        });
+
+        expect(output).toBe('active-trace event');
     });
 });

@@ -8,6 +8,7 @@ import * as winston from 'winston';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const DailyRotateFile = require('winston-daily-rotate-file');
 import { ConfigLoader } from './ConfigLoader';
+import { LOG_CONTEXT_SYMBOL, readLogContext, type LogContextMetadata } from './LogContextMetadata';
 import { LogPosition, UNKNOWN_LOG_POSITION } from './LogPosition';
 import { LOG_POSITION_SYMBOL, readLogPosition, type LogPositionMetadata } from './LogPositionMetadata';
 import { LoggerContext } from './LoggerContext';
@@ -23,12 +24,18 @@ function serializeMeta(meta: unknown[], maskingPolicy: MaskingPolicy): unknown[]
 function createLogMetadata(
     meta: unknown[],
     maskingPolicy: MaskingPolicy,
-    needsLogPosition: boolean
-): { meta: unknown[] } & LogPositionMetadata {
-    const metadata: { meta: unknown[] } & LogPositionMetadata = {
+    needsLogPosition: boolean,
+    needsLogContext: boolean
+): { meta: unknown[] } & LogPositionMetadata & LogContextMetadata {
+    const capturedTraceId = needsLogContext ? LoggerContext.get('traceId') : undefined;
+    const metadata: { meta: unknown[] } & LogPositionMetadata & LogContextMetadata = {
         meta: serializeMeta(meta, maskingPolicy),
     };
     if (needsLogPosition) metadata[LOG_POSITION_SYMBOL] = LogPosition.capture();
+    if (needsLogContext) {
+        metadata[LOG_CONTEXT_SYMBOL] =
+            capturedTraceId === undefined ? { captured: true } : { captured: true, traceId: capturedTraceId };
+    }
     return metadata;
 }
 
@@ -57,8 +64,9 @@ function createFormat(pattern: string): winston.Logform.Format {
         }
 
         if (pattern.includes('%{traceId}')) {
-            const store = LoggerContext.getStore();
-            replacements['%{traceId}'] = store?.get('traceId') ?? '-';
+            const capturedContext = readLogContext(info);
+            const traceId = capturedContext?.traceId ?? (capturedContext ? undefined : LoggerContext.get('traceId'));
+            replacements['%{traceId}'] = traceId ?? '-';
         }
 
         for (const [key, value] of Object.entries(replacements)) {
@@ -72,10 +80,12 @@ function createFormat(pattern: string): winston.Logform.Format {
 function createJsonFormat(): winston.Logform.Format {
     return winston.format.combine(
         winston.format((info) => {
-            const store = LoggerContext.getStore();
-            const traceId = store?.get('traceId');
+            const capturedContext = readLogContext(info);
+            const traceId = capturedContext?.traceId ?? (capturedContext ? undefined : LoggerContext.get('traceId'));
             if (traceId !== undefined) {
                 info.traceId = traceId;
+            } else {
+                delete info.traceId;
             }
             return info;
         })(),
@@ -182,19 +192,23 @@ export class LoggerFactory {
         const needsLogPosition =
             pattern.includes('%{log_position}') &&
             ((config.console.enabled && config.console.format !== 'json') || config.file.enabled);
+        const needsLogContext =
+            (config.console.enabled && config.console.format === 'json') ||
+            (pattern.includes('%{traceId}') &&
+                ((config.console.enabled && config.console.format !== 'json') || config.file.enabled));
 
         const wrapper: LoggerInterface = {
             debug(message: string, ...meta: unknown[]): void {
-                winstonLogger.debug(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
+                winstonLogger.debug(message, createLogMetadata(meta, maskingPolicy, needsLogPosition, needsLogContext));
             },
             info(message: string, ...meta: unknown[]): void {
-                winstonLogger.info(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
+                winstonLogger.info(message, createLogMetadata(meta, maskingPolicy, needsLogPosition, needsLogContext));
             },
             warn(message: string, ...meta: unknown[]): void {
-                winstonLogger.warn(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
+                winstonLogger.warn(message, createLogMetadata(meta, maskingPolicy, needsLogPosition, needsLogContext));
             },
             error(message: string, ...meta: unknown[]): void {
-                winstonLogger.error(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
+                winstonLogger.error(message, createLogMetadata(meta, maskingPolicy, needsLogPosition, needsLogContext));
             },
         };
 

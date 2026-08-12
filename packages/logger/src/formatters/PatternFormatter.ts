@@ -1,4 +1,6 @@
 import winston from 'winston';
+import { LoggerContext } from '../core/LoggerContext';
+import { readLogContext } from '../core/LogContextMetadata';
 import { LogPosition } from '../core/LogPosition';
 import { readLogPosition } from '../core/LogPositionMetadata';
 import { normalizeMeta, safeStringify } from '../core/MetaSerializer';
@@ -33,6 +35,7 @@ const PLACEHOLDERS = {
  */
 export const createPatternFormatter = (pattern: string): winston.Logform.Format => {
     const needsLogPosition = pattern.includes('%{log_position}');
+    const needsTraceId = pattern.includes('%{traceId}');
     return winston.format.printf((info) => {
         let result = pattern;
         for (const [key, resolver] of Object.entries(PLACEHOLDERS)) {
@@ -43,6 +46,11 @@ export const createPatternFormatter = (pattern: string): winston.Logform.Format 
         }
         if (needsLogPosition) {
             result = result.replaceAll('%{log_position}', readLogPosition(info) ?? LogPosition.capture());
+        }
+        if (needsTraceId) {
+            const capturedContext = readLogContext(info);
+            const traceId = capturedContext?.traceId ?? (capturedContext ? undefined : LoggerContext.get('traceId'));
+            result = result.replaceAll('%{traceId}', traceId ?? '-');
         }
         return result;
     });

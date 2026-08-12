@@ -373,35 +373,55 @@ app.use((req, res, next) => {
 
 ## TraceContext - traceId 追踪
 
-LoggerContext 提供基于 AsyncLocalStorage 的上下文传递，支持 traceId 在异步调用链中自动传递。
+LoggerContext 提供基于 AsyncLocalStorage 的显式作用域传递，支持 traceId 在同步、Promise 和 timer 调用链中自动传播，并隔离嵌套与并发分支。应在请求或任务入口使用 `withContext()`；作用域正常返回、抛错或 Promise rejection 后，调用方原有上下文会自动恢复。
 
 ```typescript
 import { LoggerFactory, LoggerContext } from '@jintianxiayu/logger';
 
 const logger = LoggerFactory.getLogger('http');
 
-// 方式1: withContext 自动清理
-LoggerContext.withContext({ traceId: 'req-123' }, () => {
+// withContext 的返回值应被 return/await，确保调用方等待完整异步链路
+await LoggerContext.withContext({ traceId: 'req-123' }, async () => {
     logger.info('request received');
-    // 调用其他异步函数时 traceId 自动传递
     await processRequest();
-});
 
-// 方式2: set/get 手动管理
-LoggerContext.set('traceId', 'req-456');
-logger.info('request started');
-LoggerContext.clear();
+    // set/clear 仅在活动作用域内可用，且只影响当前异步分支及其后代
+    LoggerContext.set('traceId', 'req-123-retry');
+    logger.info('request retried');
+});
 ```
 
 ### LoggerContext API
 
-| 方法                                    | 说明                                   |
-| --------------------------------------- | -------------------------------------- |
-| `LoggerContext.set(key, value)`         | 设置上下文值                           |
-| `LoggerContext.get(key)`                | 获取上下文值                           |
-| `LoggerContext.clear()`                 | 清空当前上下文                         |
-| `LoggerContext.withContext(values, fn)` | 在给定上下文中执行函数，执行后自动清理 |
-| `LoggerContext.getStore()`              | 获取当前存储（高级用法）               |
+| 方法                                    | 说明                                                                |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| `LoggerContext.withContext(values, fn)` | 创建并传播隔离作用域，原样返回同步值或 Promise                      |
+| `LoggerContext.get(key)`                | 读取当前作用域的字符串值；无作用域或无该字段时返回 `undefined`      |
+| `LoggerContext.set(key, value)`         | 在活动作用域内以 copy-on-write 更新当前分支；无作用域时抛错         |
+| `LoggerContext.clear()`                 | 以 copy-on-write 清空当前分支；无作用域时安全 no-op                 |
+| `LoggerContext.getStore()`              | 返回与内部状态断开的 `ReadonlyMap` 快照；无作用域时返回 `undefined` |
+
+key 必须是非空字符串，value 必须是字符串（允许空字符串）；无效参数会抛出 `TypeError`。不要修改 `getStore()` 返回值来更新上下文，应使用 `set()`、`clear()` 或嵌套 `withContext()`。
+
+logger 在每次日志 API 调用时捕获当前 traceId，同一事件的 plain、JSON 和 file transport 复用该值，不受延迟格式化或后续上下文变化影响。plain `%{traceId}` 无值时输出 `-`；JSON 有值时输出顶层 `traceId`，无值时省略该字段。
+
+### 从无作用域 set/clear 迁移
+
+`LoggerContext.set()` 不再隐式创建 ambient context。旧代码：
+
+```typescript
+LoggerContext.set('traceId', traceId);
+await handleRequest();
+LoggerContext.clear();
+```
+
+迁移为显式作用域，并返回或等待回调：
+
+```typescript
+await LoggerContext.withContext({ traceId }, () => handleRequest());
+```
+
+发布 prerelease 后应监控无作用域 `set()` 错误数、traceId 缺失率、不同请求复用 traceId 的比例及日志吞吐/延迟。如果出现不可接受回归，可回滚 logger 包版本；已经完成的 `withContext()` 入口迁移与旧版本兼容，无需回退。
 
 ### 配合 Express/Koa 中间件使用
 
@@ -412,9 +432,9 @@ const app = express();
 
 app.use((req, res, next) => {
     const traceId = req.headers['x-trace-id'] || generateTraceId();
-    LoggerContext.withContext({ traceId }, () => {
+    return LoggerContext.withContext({ traceId }, () => {
         logger.info('request incoming');
-        next();
+        return next();
     });
 });
 ```

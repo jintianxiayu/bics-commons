@@ -28,24 +28,26 @@ function basicUsage() {
 /**
  * 示例：traceId 追踪功能
  */
-function traceIdUsage() {
+async function traceIdUsage() {
     console.log('\n========== traceId 追踪 ==========\n');
 
     const logger = LoggerFactory.getLogger('trace-demo');
 
     // 方式1：使用 withContext 自动传递 traceId
-    LoggerContext.withContext({ traceId: 'req-001-abc' }, () => {
+    await LoggerContext.withContext({ traceId: 'req-001-abc' }, async () => {
         logger.info('处理 HTTP 请求');
-        // 后续的日志会自动带上 traceId
+        await Promise.resolve();
+        // 异步调用链中的日志会自动带上 traceId
         logger.info('业务处理中', { orderId: 'ord_123' });
     });
 
-    // 方式2：手动设置 traceId
-    LoggerContext.set('traceId', 'req-002-xyz');
-    logger.info('另一个请求');
-
-    // 清除 traceId
-    LoggerContext.clear();
+    // set/clear 只允许在显式作用域中使用，并采用 copy-on-write 隔离当前分支
+    LoggerContext.withContext({ traceId: 'req-002-xyz' }, () => {
+        LoggerContext.set('traceId', 'req-002-updated');
+        logger.info('另一个请求');
+        LoggerContext.clear();
+        logger.info('当前分支上下文已清空');
+    });
     logger.info('请求结束');
 }
 
@@ -127,7 +129,7 @@ async function gracefulShutdown() {
 async function main() {
     try {
         basicUsage();
-        traceIdUsage();
+        await traceIdUsage();
         sensitiveDataUsage();
         safeMetaUsage();
         multiLoggerUsage();
