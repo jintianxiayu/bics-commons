@@ -156,19 +156,32 @@ LoggerFactory.init(); // 配置错误时抛异常
 
 ### LoggerFactory.shutdown(options?)
 
-优雅关闭。等待日志写入完成。
+优雅关闭。等待日志 transport 完成关闭，最长等待 `timeout` 毫秒（默认 5000ms）；到达 timeout 后关闭调用正常完成，不再无限等待底层 transport。
 
 ```typescript
 await LoggerFactory.shutdown({ timeout: 3000 });
 ```
 
+- 同一轮并发调用共享关闭过程：只关闭一次，所有调用方等待相同结果；首个调用的 `timeout` 和 `onShutdown` 生效。
+- 关闭期间 `init()` 和 `getLogger()` 会抛出 `LoggerFactory is shutting down`，调用方应先停止业务入口再关闭 logger。
+- 正常完成、超时或关闭失败后都会清理配置与 logger 缓存；恢复使用时应重新调用 `init()` 或 `getLogger()`，不要继续保存关闭前的 logger 引用。
+- `onShutdown` 在内部状态清理后每轮最多执行一次；回调抛出的错误会由 `shutdown()` 返回。
+
 ### LoggerFactory.setupShutdownHandlers(options?)
 
-注册进程信号处理。收到 SIGTERM/SIGINT 时自动调用 shutdown。
+注册进程信号处理。收到 SIGTERM/SIGINT 时自动调用 shutdown；相同信号重复注册是幂等的，部分重叠的信号列表只会补充尚未注册的 listener。任一已注册信号触发后，LoggerFactory 会移除自己注册的全部信号处理器，等待关闭完成并请求进程正常退出。
 
 ```typescript
 LoggerFactory.setupShutdownHandlers({ timeout: 5000 });
 ```
+
+推荐停机顺序：停止接收新请求，等待正在处理的业务任务，再调用 `shutdown()`；如果使用自动信号处理器，应在应用启动时只配置一次。LoggerFactory 只会清理自己注册的 listener，不影响应用的其他信号监听器。
+
+### Prerelease 生命周期验证与回滚
+
+发布正式版本前建议在容器环境验证一次 SIGTERM：持续写入带唯一标识的日志，发送 SIGTERM，确认最后一条日志已落盘、进程在 `timeout` 上限内退出，且没有重复退出或 listener/open-handle 告警。监控退出耗时、丢失日志数量、非零退出码和重启次数。
+
+如果信号处理行为出现回归，可回滚 logger 包版本；过渡期间可不调用 `setupShutdownHandlers()`，改由应用自己的停机钩子在停止业务流量后单次 `await LoggerFactory.shutdown()`。无需配置或数据迁移。
 
 ### Logger 接口
 

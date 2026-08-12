@@ -79,8 +79,15 @@ function createJsonFormat(): winston.Logform.Format {
 export class LoggerFactory {
     private static container: winston.Container | null = null;
     private static initialized = false;
-    private static isShuttingDown = false;
+    private static shutdownPromise: Promise<void> | null = null;
+    private static shutdownHandlers = new Map<string, () => void>();
     private static wrapperCache = new Map<string, LoggerInterface>();
+
+    private static assertAvailable(): void {
+        if (this.shutdownPromise) {
+            throw new Error('LoggerFactory is shutting down');
+        }
+    }
 
     // Reserved for future use
     private static ensureContainer(): winston.Container {
@@ -112,6 +119,7 @@ export class LoggerFactory {
      * 显式加载并校验配置，配置错误时抛出异常
      */
     static init(): void {
+        this.assertAvailable();
         ConfigLoader.load();
         this.initialized = true;
     }
@@ -123,6 +131,7 @@ export class LoggerFactory {
      * @returns Logger 实例
      */
     static getLogger(name: string): LoggerInterface {
+        this.assertAvailable();
         this.lazyInit();
 
         const cached = this.wrapperCache.get(name);
@@ -231,23 +240,93 @@ export class LoggerFactory {
      *
      * 等待所有日志写入完成后关闭
      */
-    static async shutdown(options?: ShutdownOptions): Promise<void> {
-        if (this.isShuttingDown) {
-            return;
+    static shutdown(options?: ShutdownOptions): Promise<void> {
+        if (this.shutdownPromise) {
+            return this.shutdownPromise;
         }
 
-        this.isShuttingDown = true;
+        const container = this.container;
         const timeoutMs = options?.timeout ?? 5000;
+        const onShutdown = options?.onShutdown;
+        const round = this.performShutdown(container, timeoutMs, onShutdown);
+        const shared = round.finally(() => {
+            if (this.shutdownPromise === shared) {
+                this.shutdownPromise = null;
+            }
+        });
+        this.shutdownPromise = shared;
+        return shared;
+    }
 
-        await Promise.race([
-            this.container?.close() ?? Promise.resolve(),
-            new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-        ]);
+    private static async performShutdown(
+        container: winston.Container | null,
+        timeoutMs: number,
+        onShutdown?: () => void
+    ): Promise<void> {
+        let closeFailed = false;
+        let closeError: unknown;
 
-        options?.onShutdown?.();
+        try {
+            await this.waitForContainerClose(container, timeoutMs);
+        } catch (error) {
+            closeFailed = true;
+            closeError = error;
+        }
+
+        this.resetRuntimeState();
+
+        let callbackFailed = false;
+        let callbackError: unknown;
+        try {
+            onShutdown?.();
+        } catch (error) {
+            callbackFailed = true;
+            callbackError = error;
+        }
+
+        if (closeFailed) {
+            if (callbackFailed && closeError instanceof Error) {
+                Object.defineProperty(closeError, 'shutdownCallbackError', {
+                    configurable: true,
+                    value: callbackError,
+                });
+            }
+            throw closeError;
+        }
+        if (callbackFailed) {
+            throw callbackError;
+        }
+    }
+
+    private static async waitForContainerClose(
+        container: winston.Container | null,
+        timeoutMs: number
+    ): Promise<void> {
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const closePromise = Promise.resolve().then(() => container?.close());
+
+        // Promise.race 会观察 close 的拒绝；额外 observer 明确保证 timeout
+        // 先结束后，迟到的 close rejection 也不会成为 unhandled rejection。
+        void closePromise.catch(() => undefined);
+
+        const timeoutPromise = new Promise<void>((resolve) => {
+            timeoutHandle = setTimeout(resolve, Math.max(0, timeoutMs));
+        });
+
+        try {
+            await Promise.race([closePromise, timeoutPromise]);
+        } finally {
+            if (timeoutHandle !== undefined) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
+    private static resetRuntimeState(): void {
         this.container = null;
         this.initialized = false;
-        this.isShuttingDown = false;
+        this.wrapperCache.clear();
+        ConfigLoader.reset();
     }
 
     /**
@@ -256,24 +335,40 @@ export class LoggerFactory {
      * 自动在进程收到 SIGTERM/SIGINT 时调用 shutdown
      */
     static setupShutdownHandlers(options?: ShutdownOptions): void {
-        const signals = options?.signals || ['SIGTERM', 'SIGINT'];
+        const signals = options?.signals ?? ['SIGTERM', 'SIGINT'];
         const timeout = options?.timeout ?? 5000;
+        const onShutdown = options?.onShutdown;
 
         for (const signal of signals) {
-            process.on(signal, async () => {
-                await this.shutdown({ timeout, onShutdown: () => process.exit(0) });
-            });
+            if (this.shutdownHandlers.has(signal)) {
+                continue;
+            }
+
+            const handler = (): void => {
+                this.removeShutdownHandlers();
+                void this.shutdown({ timeout, onShutdown }).then(
+                    () => process.exit(0),
+                    () => process.exit(1)
+                );
+            };
+            this.shutdownHandlers.set(signal, handler);
+            process.on(signal, handler);
         }
+    }
+
+    private static removeShutdownHandlers(): void {
+        for (const [signal, handler] of this.shutdownHandlers) {
+            process.off(signal, handler);
+        }
+        this.shutdownHandlers.clear();
     }
 
     /**
      * 重置状态（用于测试）
      */
     static reset(): void {
-        this.container = null;
-        this.initialized = false;
-        this.isShuttingDown = false;
-        this.wrapperCache.clear();
-        ConfigLoader.reset();
+        this.removeShutdownHandlers();
+        this.resetRuntimeState();
+        this.shutdownPromise = null;
     }
 }

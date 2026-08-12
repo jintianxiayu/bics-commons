@@ -94,7 +94,7 @@ async function gracefulShutdown() {
     const logger = LoggerFactory.getLogger('shutdown-demo');
     logger.info('执行优雅关闭...');
 
-    // 设置超时强制退出
+    // 同一轮并发调用会共享关闭过程；关闭后如需继续使用，应重新获取 logger
     await LoggerFactory.shutdown({ timeout: 3000 });
     console.log('Logger 已关闭');
 }
