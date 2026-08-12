@@ -71,12 +71,12 @@ root:
             }
         });
 
-        it('should throw on non-existent config file when no default exists', () => {
+        it('should quietly use defaults when the optional default file does not exist', () => {
             const originalPath = process.env.LOGGER_CONFIG_PATH;
             delete process.env.LOGGER_CONFIG_PATH;
             LoggerFactory.reset();
             try {
-                expect(() => LoggerFactory.init()).toThrow();
+                expect(() => LoggerFactory.init()).not.toThrow();
             } finally {
                 if (originalPath !== undefined) {
                     process.env.LOGGER_CONFIG_PATH = originalPath;
@@ -229,8 +229,8 @@ root:
   console:
     enabled: true
     colors: false
-${formatLine}file:
-  enabled: false
+${formatLine}  file:
+    enabled: false
 `;
         }
 

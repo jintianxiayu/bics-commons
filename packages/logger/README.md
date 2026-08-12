@@ -60,6 +60,11 @@ npx ts-node examples/demo.ts
 | -------------------- | ----------------- | ---------------- |
 | `LOGGER_CONFIG_PATH` | YAML 配置文件路径 | 使用内置默认配置 |
 
+未设置 `LOGGER_CONFIG_PATH` 且当前目录不存在 `logger.yaml` 时，logger 会安静使用内置默认配置。显式设置的路径不存在或配置非法时：
+
+- `LoggerFactory.init()` 会抛出 `ConfigError`，适合生产启动时快速失败。
+- 首次 `getLogger()` 的懒加载模式会输出警告，并完整回退到内置默认配置。
+
 ### 配置文件格式
 
 ```yaml
@@ -77,10 +82,21 @@ root:
         datePattern: 'YYYY-MM-DD'
         maxSize: 10m
         maxFiles: 7d
+    sensitiveMasking:
+        enabled: true
+        fields:
+            - field: password
+              mask: '******'
+            - field: customSecret
+              mask: '********'
 
 loggers:
     database:
         level: debug
+        sensitiveMasking:
+            fields:
+                - field: password
+                  mask: 'DB-REDACTED'
     http:
         level: warn
 ```
@@ -205,6 +221,40 @@ root:
 
 自动识别并脱敏日志中的敏感字段，防止密码、信用卡、手机号等信息泄露。
 
+推荐配置键为 `sensitiveMasking`。历史键 `sensitive-masking` 在当前兼容周期内仍可使用，但已经弃用；同一配置对象中不能同时配置两个键。
+
+规则按以下顺序合并，并按 `field` 精确、大小写敏感地覆盖或追加：
+
+```text
+内置规则 → root 自定义规则 → 命名 logger 自定义规则
+```
+
+- 同名自定义规则覆盖上一层的 mask。
+- 新字段追加到继承规则，未覆盖的默认规则继续生效。
+- `fields: []` 保留继承规则，不会清空默认规则。
+- `enabled: false` 仅关闭当前有效配置对应 logger 的脱敏，不影响其他 logger。
+
+```yaml
+root:
+    sensitiveMasking:
+        enabled: true
+        fields:
+            - field: password
+              mask: '******'
+            - field: customSecret
+              mask: '********'
+
+loggers:
+    audit:
+        sensitiveMasking:
+            fields:
+                - field: password
+                  mask: 'AUDIT-REDACTED'
+    local-debug:
+        sensitiveMasking:
+            enabled: false
+```
+
 ### 默认脱敏字段
 
 | 字段                                      | 脱敏模板                 | 示例                                        |
@@ -249,11 +299,21 @@ app.use((req, res, next) => {
         method: req.method,
         path: req.path,
         ip: req.ip,
-        auth: req.headers.authorization, // → ********
+        token: req.headers.authorization, // 默认 token 规则 → ********
     });
     next();
 });
 ```
+
+### 配置校验与静默 Logger
+
+`level`、`console`、`file`、`pattern` 和 `sensitiveMasking` 都会经过严格结构校验，未知字段也会被拒绝。错误信息包含完整配置路径，例如 `loggers.database.level`。
+
+当某个 logger 的 console 与 file 均为 `enabled: false` 时，返回的 Logger 仍实现全部日志方法，但会安全静默：不输出、不抛异常，也不会产生 Winston 的无 transport 警告。
+
+### 灰度与回滚
+
+建议先发布 prerelease，在真实服务中验证自定义字段、命名 logger 覆盖以及日志采集格式。若局部脱敏模板影响排查，可临时对指定命名 logger 设置 `sensitiveMasking.enabled: false`；若配置兼容出现整体问题，应回滚 logger 包版本，不建议在生产环境全局关闭默认脱敏。
 
 ## TraceContext - traceId 追踪
 

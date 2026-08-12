@@ -65,8 +65,8 @@ function sensitiveDataUsage() {
 
     logger.warn('支付失败', {
         orderId: 'ord_789',
-        cardNumber: '5555555555554444', // 会自动掩码
-        cvv: '123', // 会自动掩码
+        cardNo: '5555555555554444', // 默认规则会自动掩码
+        status: 'declined',
     });
 }
 

@@ -2,87 +2,89 @@
  * SensitiveMasker 单元测试
  */
 
-import { SensitiveMasker } from '../../../src/core/SensitiveMasker';
+import { createMaskingPolicy, type MaskingPolicy } from '../../../src/core/SensitiveMasker';
 
 describe('SensitiveMasker', () => {
+    let policy: MaskingPolicy;
+
     beforeEach(() => {
-        SensitiveMasker.reset();
+        policy = createMaskingPolicy();
     });
 
     describe('compileTemplate & renderMask', () => {
         it('should render full mask template', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '********' }] });
-            const result = SensitiveMasker.mask({ password: 'secret123' });
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const result = policy.mask({ password: 'secret123' });
             expect(result).toEqual({ password: '********' });
         });
 
         it('should render {last4} placeholder', () => {
-            SensitiveMasker.init({ fields: [{ field: 'phone', mask: '*** *** {last4}' }] });
-            const result = SensitiveMasker.mask({ phone: '13812345678' });
+            policy = createMaskingPolicy({ fields: [{ field: 'phone', mask: '*** *** {last4}' }] });
+            const result = policy.mask({ phone: '13812345678' });
             expect(result).toEqual({ phone: '*** *** 5678' });
         });
 
         it('should render {firstN} placeholder', () => {
-            SensitiveMasker.init({ fields: [{ field: 'id', mask: '{first3}****' }] });
-            const result = SensitiveMasker.mask({ id: '13812345678' });
+            policy = createMaskingPolicy({ fields: [{ field: 'id', mask: '{first3}****' }] });
+            const result = policy.mask({ id: '13812345678' });
             expect(result).toEqual({ id: '138****' });
         });
 
         it('should render {domain} placeholder', () => {
-            SensitiveMasker.init({ fields: [{ field: 'email', mask: '{first2}***@{domain}' }] });
-            const result = SensitiveMasker.mask({ email: 'john@example.com' });
+            policy = createMaskingPolicy({ fields: [{ field: 'email', mask: '{first2}***@{domain}' }] });
+            const result = policy.mask({ email: 'john@example.com' });
             expect(result).toEqual({ email: 'jo***@example.com' });
         });
     });
 
     describe('applyPlaceholder', () => {
         it('should handle {lastN} when value length <= N', () => {
-            SensitiveMasker.init({ fields: [{ field: 'code', mask: '{last4}' }] });
-            const result = SensitiveMasker.mask({ code: '123' });
+            policy = createMaskingPolicy({ fields: [{ field: 'code', mask: '{last4}' }] });
+            const result = policy.mask({ code: '123' });
             expect(result).toEqual({ code: '*123' });
         });
 
         it('should handle email without @ as domain', () => {
-            SensitiveMasker.init({ fields: [{ field: 'email', mask: '{domain}' }] });
-            const result = SensitiveMasker.mask({ email: 'justusername' });
+            policy = createMaskingPolicy({ fields: [{ field: 'email', mask: '{domain}' }] });
+            const result = policy.mask({ email: 'justusername' });
             expect(result).toEqual({ email: '********' });
         });
     });
 
     describe('maskObject - top level', () => {
         it('should mask top-level sensitive field', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '********' }] });
-            const result = SensitiveMasker.mask({ password: 'secret123' });
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const result = policy.mask({ password: 'secret123' });
             expect(result).toEqual({ password: '********' });
         });
 
         it('should not mask non-sensitive fields', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '********' }] });
-            const result = SensitiveMasker.mask({ username: 'john' });
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const result = policy.mask({ username: 'john' });
             expect(result).toEqual({ username: 'john' });
         });
     });
 
     describe('maskObject - nested', () => {
         it('should mask nested sensitive field', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '********' }] });
-            const result = SensitiveMasker.mask({ user: { password: 'secret123' } });
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const result = policy.mask({ user: { password: 'secret123' } });
             expect(result).toEqual({ user: { password: '********' } });
         });
 
         it('should handle deep nesting within limit', () => {
-            SensitiveMasker.init({ fields: [{ field: 'secret', mask: '****' }] });
+            policy = createMaskingPolicy({ fields: [{ field: 'secret', mask: '****' }] });
             const deep = { l1: { l2: { l3: { l4: { l5: { secret: 'data' } } } } } };
-            const result = SensitiveMasker.mask(deep) as { l1: { l2: { l3: { l4: { l5: { secret: string } } } } } };
+            const result = policy.mask(deep) as { l1: { l2: { l3: { l4: { l5: { secret: string } } } } } };
             expect(result.l1.l2.l3.l4.l5.secret).toBe('****');
         });
 
         it('should return MAX_DEPTH_EXCEEDED for too deep nesting', () => {
-            SensitiveMasker.init({ fields: [{ field: 'secret', mask: '****' }] });
+            policy = createMaskingPolicy({ fields: [{ field: 'secret', mask: '****' }] });
             const deep = {
                 l1: { l2: { l3: { l4: { l5: { l6: { secret: 'data' } } } } } },
             };
-            const result = SensitiveMasker.mask(deep) as {
+            const result = policy.mask(deep) as {
                 l1: { l2: { l3: { l4: { l5: { l6: { secret: string } } } } } };
             };
             expect(result.l1.l2.l3.l4.l5.l6).toBe('[MAX_DEPTH_EXCEEDED]');
@@ -91,8 +93,8 @@ describe('SensitiveMasker', () => {
 
     describe('maskObject - array', () => {
         it('should mask sensitive fields in array', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '********' }] });
-            const result = SensitiveMasker.mask({
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const result = policy.mask({
                 users: [
                     { name: 'A', password: 'pass1' },
                     { name: 'B', password: 'pass2' },
@@ -109,56 +111,56 @@ describe('SensitiveMasker', () => {
 
     describe('switch control', () => {
         it('should mask when enabled (default)', () => {
-            SensitiveMasker.init({});
-            const result = SensitiveMasker.mask({ password: 'secret' });
+            policy = createMaskingPolicy({});
+            const result = policy.mask({ password: 'secret' });
             expect(result).toEqual({ password: '********' });
         });
 
         it('should not mask when disabled', () => {
-            SensitiveMasker.init({ enabled: false });
-            const result = SensitiveMasker.mask({ password: 'secret' });
+            policy = createMaskingPolicy({ enabled: false });
+            const result = policy.mask({ password: 'secret' });
             expect(result).toEqual({ password: 'secret' });
         });
     });
 
     describe('edge cases', () => {
         it('should handle null value', () => {
-            SensitiveMasker.init({ fields: [{ field: 'data', mask: '****' }] });
-            const result = SensitiveMasker.mask({ data: null });
+            policy = createMaskingPolicy({ fields: [{ field: 'data', mask: '****' }] });
+            const result = policy.mask({ data: null });
             expect(result).toEqual({ data: '****' });
         });
 
         it('should handle undefined value', () => {
-            SensitiveMasker.init({ fields: [{ field: 'data', mask: '****' }] });
-            const result = SensitiveMasker.mask({ data: undefined });
+            policy = createMaskingPolicy({ fields: [{ field: 'data', mask: '****' }] });
+            const result = policy.mask({ data: undefined });
             expect(result).toEqual({ data: '****' });
         });
 
         it('should handle number value', () => {
-            SensitiveMasker.init({ fields: [{ field: 'data', mask: '****' }] });
-            const result = SensitiveMasker.mask({ data: 12345 });
+            policy = createMaskingPolicy({ fields: [{ field: 'data', mask: '****' }] });
+            const result = policy.mask({ data: 12345 });
             expect(result).toEqual({ data: '****' });
         });
     });
 
     describe('empty string', () => {
         it('should handle empty string', () => {
-            SensitiveMasker.init({ fields: [{ field: 'name', mask: '{last4}' }] });
-            const result = SensitiveMasker.mask({ name: '' });
+            policy = createMaskingPolicy({ fields: [{ field: 'name', mask: '{last4}' }] });
+            const result = policy.mask({ name: '' });
             expect(result).toEqual({ name: '' });
         });
     });
 
     describe('config override', () => {
         it('should use custom mask from config', () => {
-            SensitiveMasker.init({ fields: [{ field: 'password', mask: '******' }] });
-            const result = SensitiveMasker.mask({ password: 'secret' });
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '******' }] });
+            const result = policy.mask({ password: 'secret' });
             expect(result).toEqual({ password: '******' });
         });
 
         it('should add custom sensitive field', () => {
-            SensitiveMasker.init({ fields: [{ field: 'customSecret', mask: '********' }] });
-            const result = SensitiveMasker.mask({ customSecret: 'mysecret' });
+            policy = createMaskingPolicy({ fields: [{ field: 'customSecret', mask: '********' }] });
+            const result = policy.mask({ customSecret: 'mysecret' });
             expect(result).toEqual({ customSecret: '********' });
         });
     });

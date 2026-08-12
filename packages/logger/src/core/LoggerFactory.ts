@@ -10,24 +10,17 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 import { ConfigLoader } from './ConfigLoader';
 import { LogPosition } from './LogPosition';
 import { LoggerContext } from './LoggerContext';
-import { SensitiveMasker } from './SensitiveMasker';
+import { createMaskingPolicy, type MaskingPolicy } from './SensitiveMasker';
 import { getDefaultConfig, DEFAULT_PATTERN } from '../config/defaultConfig';
-import type { LoggerConfig, ShutdownOptions } from '../types';
+import type { EffectiveLoggerConfig, LoggerInterface, ShutdownOptions } from '../types';
 
-interface LoggerInterface {
-    debug(message: string, ...meta: unknown[]): void;
-    info(message: string, ...meta: unknown[]): void;
-    warn(message: string, ...meta: unknown[]): void;
-    error(message: string, ...meta: unknown[]): void;
-}
-
-function serializeMeta(meta: unknown[]): unknown[] {
+function serializeMeta(meta: unknown[], maskingPolicy: MaskingPolicy): unknown[] {
     return meta.map((m) => {
         if (m instanceof Error) {
             return { message: m.message, stack: m.stack };
         }
         if (m !== null && typeof m === 'object') {
-            return SensitiveMasker.mask(m);
+            return maskingPolicy.mask(m);
         }
         return m;
     });
@@ -108,6 +101,7 @@ export class LoggerFactory {
         } catch (error) {
             console.warn(`[WARN] Logger config error: ${(error as Error).message}`);
             console.warn('[WARN] Using default config.');
+            ConfigLoader.useDefaultConfig();
             this.initialized = true;
         }
     }
@@ -136,8 +130,7 @@ export class LoggerFactory {
             return cached;
         }
 
-        const container = this.ensureContainer();
-        let config: LoggerConfig;
+        let config: EffectiveLoggerConfig;
 
         const loggerConfig = ConfigLoader.getLoggerConfig(name);
         if (loggerConfig) {
@@ -147,6 +140,18 @@ export class LoggerFactory {
             config = rootConfig;
         }
 
+        if (!config.console.enabled && !config.file.enabled) {
+            const noop: LoggerInterface = {
+                debug(): void {},
+                info(): void {},
+                warn(): void {},
+                error(): void {},
+            };
+            this.wrapperCache.set(name, noop);
+            return noop;
+        }
+
+        const container = this.ensureContainer();
         if (!container.has(name)) {
             container.add(name, {
                 level: config.level || 'info',
@@ -156,19 +161,20 @@ export class LoggerFactory {
         }
 
         const winstonLogger = container.get(name);
+        const maskingPolicy = createMaskingPolicy(config.sensitiveMasking);
 
         const wrapper: LoggerInterface = {
             debug(message: string, ...meta: unknown[]): void {
-                winstonLogger.debug(message, { meta: serializeMeta(meta) });
+                winstonLogger.debug(message, { meta: serializeMeta(meta, maskingPolicy) });
             },
             info(message: string, ...meta: unknown[]): void {
-                winstonLogger.info(message, { meta: serializeMeta(meta) });
+                winstonLogger.info(message, { meta: serializeMeta(meta, maskingPolicy) });
             },
             warn(message: string, ...meta: unknown[]): void {
-                winstonLogger.warn(message, { meta: serializeMeta(meta) });
+                winstonLogger.warn(message, { meta: serializeMeta(meta, maskingPolicy) });
             },
             error(message: string, ...meta: unknown[]): void {
-                winstonLogger.error(message, { meta: serializeMeta(meta) });
+                winstonLogger.error(message, { meta: serializeMeta(meta, maskingPolicy) });
             },
         };
 
@@ -176,7 +182,7 @@ export class LoggerFactory {
         return wrapper;
     }
 
-    private static createTransports(config: LoggerConfig): winston.transport[] {
+    private static createTransports(config: EffectiveLoggerConfig): winston.transport[] {
         const transports: winston.transport[] = [];
 
         if (config.console?.enabled !== false) {
@@ -269,6 +275,5 @@ export class LoggerFactory {
         this.isShuttingDown = false;
         this.wrapperCache.clear();
         ConfigLoader.reset();
-        SensitiveMasker.reset();
     }
 }

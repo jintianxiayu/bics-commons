@@ -4,7 +4,7 @@
  * 当未提供配置文件或配置缺失时使用的默认值
  */
 
-import type { LoggerConfig, SensitiveFieldConfig } from '../types';
+import type { EffectiveLoggerConfig, SensitiveFieldConfig } from '../types';
 
 export const DEFAULT_SENSITIVE_FIELDS: SensitiveFieldConfig[] = [
     { field: 'password', mask: '********' },
@@ -31,7 +31,7 @@ export const DEFAULT_PATTERN = '%{timestamp} %{level} [%{name}] [%{traceId}] %{l
 
 export const DEFAULT_LOG_LEVEL = 'info' as const;
 
-export const defaultConfig: LoggerConfig = {
+export const defaultConfig: EffectiveLoggerConfig = {
     level: DEFAULT_LOG_LEVEL,
     pattern: DEFAULT_PATTERN,
     console: {
@@ -47,8 +47,46 @@ export const defaultConfig: LoggerConfig = {
         maxSize: '10m',
         maxFiles: '7d',
     },
+    sensitiveMasking: {
+        enabled: true,
+        fields: DEFAULT_SENSITIVE_FIELDS,
+    },
 };
 
-export function getDefaultConfig(): LoggerConfig {
-    return { ...defaultConfig };
+export function cloneSensitiveFields(fields: SensitiveFieldConfig[]): SensitiveFieldConfig[] {
+    return fields.map((field) => ({ ...field }));
+}
+
+export function mergeSensitiveFields(
+    ...layers: Array<readonly SensitiveFieldConfig[] | undefined>
+): SensitiveFieldConfig[] {
+    const result: SensitiveFieldConfig[] = [];
+    const indexes = new Map<string, number>();
+
+    for (const fields of layers) {
+        for (const field of fields ?? []) {
+            const cloned = { ...field };
+            const index = indexes.get(field.field);
+            if (index === undefined) {
+                indexes.set(field.field, result.length);
+                result.push(cloned);
+            } else {
+                result[index] = cloned;
+            }
+        }
+    }
+
+    return result;
+}
+
+export function getDefaultConfig(): EffectiveLoggerConfig {
+    return {
+        ...defaultConfig,
+        console: { ...defaultConfig.console },
+        file: { ...defaultConfig.file },
+        sensitiveMasking: {
+            enabled: defaultConfig.sensitiveMasking.enabled,
+            fields: cloneSensitiveFields(defaultConfig.sensitiveMasking.fields),
+        },
+    };
 }

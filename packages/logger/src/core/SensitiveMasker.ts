@@ -1,29 +1,19 @@
-/**
- * SensitiveMasker - 敏感信息脱敏模块
- *
- * 提供基于字段名的敏感信息脱敏能力，支持模板化脱敏规则、递归脱敏处理
- */
+/** 敏感信息脱敏策略。每个 logger 持有独立实例，避免配置串扰。 */
 
 import type { SensitiveFieldConfig, SensitiveMaskingConfig } from '../types';
-import { DEFAULT_SENSITIVE_FIELDS } from '../config/defaultConfig';
+import { DEFAULT_SENSITIVE_FIELDS, mergeSensitiveFields } from '../config/defaultConfig';
+
+export interface MaskingPolicy {
+    readonly enabled: boolean;
+    mask(obj: unknown): unknown;
+}
 
 interface RenderContext {
-    masks: Map<string, string>;
-    fieldSet: Set<string>;
     fieldLookup: Map<string, SensitiveFieldConfig>;
     rendererCache: Map<string, (value: string) => string>;
-    enabled: boolean;
 }
 
 const MAX_DEPTH = 5;
-
-let context: RenderContext | null = null;
-
-function compileTemplate(template: string): (value: string) => string {
-    return (value: string): string => {
-        return renderMask(value, template);
-    };
-}
 
 function applyPlaceholder(value: string, placeholder: string): string {
     if (value === '') return '';
@@ -44,8 +34,7 @@ function applyPlaceholder(value: string, placeholder: string): string {
 
     if (placeholder === '{domain}') {
         const atIndex = value.indexOf('@');
-        if (atIndex === -1) return '********';
-        return value.slice(atIndex + 1);
+        return atIndex === -1 ? '********' : value.slice(atIndex + 1);
     }
 
     return placeholder;
@@ -53,137 +42,66 @@ function applyPlaceholder(value: string, placeholder: string): string {
 
 function renderMask(value: string, template: string): string {
     let result = template;
-
-    const placeholderRegex = /\{last\d+\}|\{first\d+\}|\{domain\}/g;
-    const placeholders = result.match(placeholderRegex);
-
-    if (placeholders) {
-        for (const ph of placeholders) {
-            result = result.replace(ph, applyPlaceholder(value, ph));
-        }
+    for (const placeholder of result.match(/\{last\d+\}|\{first\d+\}|\{domain\}/g) ?? []) {
+        result = result.replace(placeholder, applyPlaceholder(value, placeholder));
     }
-
-    result = result.replace(/\*/g, '*');
-
     return result;
 }
 
-function maskValue(value: unknown, config: SensitiveFieldConfig): string {
-    let strValue: string;
-    if (value === null) {
-        strValue = 'null';
-    } else if (value === undefined) {
-        strValue = 'undefined';
-    } else {
-        strValue = String(value);
+function createRenderer(context: RenderContext, template: string): (value: string) => string {
+    let renderer = context.rendererCache.get(template);
+    if (!renderer) {
+        renderer = (value) => renderMask(value, template);
+        context.rendererCache.set(template, renderer);
     }
+    return renderer;
+}
 
+function maskValue(context: RenderContext, value: unknown, config: SensitiveFieldConfig): string {
+    const strValue = value === null ? 'null' : value === undefined ? 'undefined' : String(value);
     try {
-        const renderer = getRenderer(config.mask);
-        return renderer(strValue);
+        return createRenderer(context, config.mask)(strValue);
     } catch {
         return '*'.repeat(Math.min(strValue.length, 12));
     }
 }
 
-function getRenderer(template: string): (value: string) => string {
-    if (!context) {
-        throw new Error('SensitiveMasker not initialized');
-    }
-
-    if (!context.rendererCache.has(template)) {
-        context.rendererCache.set(template, compileTemplate(template));
-    }
-
-    return context.rendererCache.get(template)!;
-}
-
-function maskObject(obj: unknown, depth: number = 0): unknown {
-    if (depth > MAX_DEPTH) {
-        return '[MAX_DEPTH_EXCEEDED]';
-    }
-
-    if (obj === null || obj === undefined) {
-        return obj;
-    }
-
-    if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
-        return obj;
-    }
-
-    if (Array.isArray(obj)) {
-        return obj.map((item) => maskObject(item, depth + 1));
-    }
+function maskObject(context: RenderContext, obj: unknown, depth = 0): unknown {
+    if (depth > MAX_DEPTH) return '[MAX_DEPTH_EXCEEDED]';
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') return obj;
+    if (Array.isArray(obj)) return obj.map((item) => maskObject(context, item, depth + 1));
 
     if (typeof obj === 'object') {
         const result: Record<string, unknown> = {};
-
         for (const [key, value] of Object.entries(obj)) {
-            if (context?.fieldSet.has(key)) {
-                const config = context!.fieldLookup.get(key);
-                if (config) {
-                    result[key] = maskValue(value, config);
-                    continue;
-                }
-            }
-
-            if (value !== null && typeof value === 'object') {
-                result[key] = maskObject(value, depth + 1);
+            const fieldConfig = context.fieldLookup.get(key);
+            if (fieldConfig) {
+                result[key] = maskValue(context, value, fieldConfig);
+            } else if (value !== null && typeof value === 'object') {
+                result[key] = maskObject(context, value, depth + 1);
             } else {
                 result[key] = value;
             }
         }
-
         return result;
     }
 
     return obj;
 }
 
-function init(config?: SensitiveMaskingConfig): void {
+export function createMaskingPolicy(config?: SensitiveMaskingConfig): MaskingPolicy {
     const enabled = config?.enabled !== false;
-    const fields = config?.fields?.length ? config.fields : DEFAULT_SENSITIVE_FIELDS;
-
-    const fieldLookup = new Map<string, SensitiveFieldConfig>();
-    const fieldSet = new Set<string>();
-
-    for (const fieldConfig of fields) {
-        fieldLookup.set(fieldConfig.field, fieldConfig);
-        fieldSet.add(fieldConfig.field);
-    }
-
-    context = {
-        masks: new Map(fields.map((f) => [f.field, f.mask])),
-        fieldSet,
-        fieldLookup,
+    const fields = mergeSensitiveFields(DEFAULT_SENSITIVE_FIELDS, config?.fields);
+    const context: RenderContext = {
+        fieldLookup: new Map(fields.map((field) => [field.field, { ...field }])),
         rendererCache: new Map(),
-        enabled,
     };
+
+    return Object.freeze({
+        enabled,
+        mask(obj: unknown): unknown {
+            return enabled ? maskObject(context, obj) : obj;
+        },
+    });
 }
-
-function isInitialized(): boolean {
-    return context !== null;
-}
-
-function reset(): void {
-    context = null;
-}
-
-function mask(obj: unknown): unknown {
-    if (!context) {
-        init();
-    }
-
-    if (context && !context.enabled) {
-        return obj;
-    }
-
-    return maskObject(obj, 0);
-}
-
-export const SensitiveMasker = {
-    init,
-    isInitialized,
-    reset,
-    mask,
-};

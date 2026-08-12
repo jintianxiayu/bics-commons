@@ -1,83 +1,182 @@
 /**
- * 配置加载器
+ * Logger 配置加载器。
  *
- * 负责从 YAML 文件加载配置，支持递归合并和配置校验
+ * 配置按“解析 → 校验/别名规范化 → root 合并 → 命名 logger 合并”处理，
+ * 只有全部步骤成功后才会原子替换缓存。
  */
 
 import { readFileSync } from 'fs';
 import { parse as yamlParse } from 'yaml';
-import { getDefaultConfig } from '../config/defaultConfig';
-import type { LoggerConfig } from '../types';
+import { getDefaultConfig, mergeSensitiveFields } from '../config/defaultConfig';
+import type { EffectiveLoggerConfig, LoggerConfig, SensitiveFieldConfig, SensitiveMaskingConfig } from '../types';
 
 const CONFIG_ENV_KEY = 'LOGGER_CONFIG_PATH';
 const DEFAULT_CONFIG_PATH = './logger.yaml';
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 
-interface ParsedConfig {
-    root?: Partial<LoggerConfig>;
-    loggers?: Record<string, Partial<LoggerConfig>>;
+interface ConfigSource {
+    path: string;
+    optional: boolean;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * 递归合并配置（JSON Merge Patch 风格）
- */
-function mergeConfig(target: Partial<LoggerConfig>, source: Partial<LoggerConfig>): Partial<LoggerConfig> {
-    if (!isObject(target) || !isObject(source)) {
-        return source;
-    }
+export class ConfigError extends Error {
+    readonly path?: string;
 
-    const result: Record<string, unknown> = { ...target };
-
-    for (const key of Object.keys(source)) {
-        const targetValue = (target as Record<string, unknown>)[key];
-        const sourceValue = (source as Record<string, unknown>)[key];
-
-        if (isObject(targetValue) && isObject(sourceValue)) {
-            result[key] = mergeConfig(targetValue as Partial<LoggerConfig>, sourceValue as Partial<LoggerConfig>);
-        } else {
-            result[key] = sourceValue;
-        }
-    }
-
-    return result as Partial<LoggerConfig>;
-}
-
-function validateConfigValue(value: unknown, path: string): void {
-    if (value === undefined) return;
-
-    if (path === 'root.level' || path === 'loggers.*.level') {
-        if (typeof value !== 'string' || !['debug', 'info', 'warn', 'error'].includes(value)) {
-            throw new Error(`Invalid log level at ${path}: ${value}`);
-        }
-    }
-
-    if (isObject(value)) {
-        for (const [k, v] of Object.entries(value)) {
-            validateConfigValue(v, `${path}.${k}`);
-        }
-    }
-}
-
-class ConfigError extends Error {
-    constructor(message: string) {
-        super(message);
+    constructor(message: string, path?: string) {
+        super(path ? `Invalid configuration at ${path}: ${message}` : message);
         this.name = 'ConfigError';
+        this.path = path;
     }
 }
 
-/**
- * 加载并解析 YAML 配置文件
- */
-function loadYamlFile(filePath: string): Partial<ParsedConfig> {
+function assertObject(value: unknown, path: string): asserts value is Record<string, unknown> {
+    if (!isObject(value)) {
+        throw new ConfigError('expected an object', path);
+    }
+}
+
+function assertKnownKeys(value: Record<string, unknown>, keys: readonly string[], path: string): void {
+    const known = new Set(keys);
+    for (const key of Object.keys(value)) {
+        if (!known.has(key)) {
+            throw new ConfigError('unknown field', `${path}.${key}`);
+        }
+    }
+}
+
+function assertBoolean(value: unknown, path: string): void {
+    if (typeof value !== 'boolean') {
+        throw new ConfigError(`expected boolean, received ${JSON.stringify(value)}`, path);
+    }
+}
+
+function assertString(value: unknown, path: string, nonEmpty = false): void {
+    if (typeof value !== 'string' || (nonEmpty && value.trim().length === 0)) {
+        throw new ConfigError(nonEmpty ? 'expected a non-empty string' : 'expected a string', path);
+    }
+}
+
+function validateConsoleConfig(value: unknown, path: string): void {
+    assertObject(value, path);
+    assertKnownKeys(value, ['enabled', 'colors', 'format'], path);
+    if ('enabled' in value) assertBoolean(value.enabled, `${path}.enabled`);
+    if ('colors' in value) assertBoolean(value.colors, `${path}.colors`);
+    if ('format' in value && value.format !== 'plain' && value.format !== 'json') {
+        throw new ConfigError('expected plain or json', `${path}.format`);
+    }
+}
+
+function validateFileConfig(value: unknown, path: string): void {
+    assertObject(value, path);
+    assertKnownKeys(value, ['enabled', 'dirname', 'filename', 'datePattern', 'maxSize', 'maxFiles'], path);
+    if ('enabled' in value) assertBoolean(value.enabled, `${path}.enabled`);
+    for (const key of ['dirname', 'filename', 'datePattern', 'maxSize', 'maxFiles'] as const) {
+        if (key in value) assertString(value[key], `${path}.${key}`);
+    }
+}
+
+function validateSensitiveMaskingConfig(value: unknown, path: string): void {
+    assertObject(value, path);
+    assertKnownKeys(value, ['enabled', 'fields'], path);
+    if ('enabled' in value) assertBoolean(value.enabled, `${path}.enabled`);
+    if (!('fields' in value)) return;
+    if (!Array.isArray(value.fields)) {
+        throw new ConfigError('expected an array', `${path}.fields`);
+    }
+
+    const seen = new Set<string>();
+    value.fields.forEach((field, index) => {
+        const fieldPath = `${path}.fields[${index}]`;
+        assertObject(field, fieldPath);
+        assertKnownKeys(field, ['field', 'mask'], fieldPath);
+        assertString(field.field, `${fieldPath}.field`, true);
+        assertString(field.mask, `${fieldPath}.mask`, true);
+        const name = field.field as string;
+        if (seen.has(name)) {
+            throw new ConfigError(`duplicate sensitive field ${JSON.stringify(name)}`, `${fieldPath}.field`);
+        }
+        seen.add(name);
+    });
+}
+
+function validateAndNormalizeLoggerConfig(value: unknown, path: string): LoggerConfig {
+    assertObject(value, path);
+    assertKnownKeys(value, ['level', 'console', 'file', 'pattern', 'sensitiveMasking', 'sensitive-masking'], path);
+
+    if ('sensitiveMasking' in value && 'sensitive-masking' in value) {
+        throw new ConfigError('sensitiveMasking conflicts with sensitive-masking', path);
+    }
+    if ('level' in value && (typeof value.level !== 'string' || !LOG_LEVELS.includes(value.level as never))) {
+        throw new ConfigError('expected debug, info, warn, or error', `${path}.level`);
+    }
+    if ('pattern' in value) assertString(value.pattern, `${path}.pattern`);
+    if ('console' in value) validateConsoleConfig(value.console, `${path}.console`);
+    if ('file' in value) validateFileConfig(value.file, `${path}.file`);
+
+    const sensitiveValue = value.sensitiveMasking ?? value['sensitive-masking'];
+    if (sensitiveValue !== undefined) {
+        validateSensitiveMaskingConfig(sensitiveValue, `${path}.sensitiveMasking`);
+    }
+
+    const normalized: LoggerConfig = {};
+    if ('level' in value) normalized.level = value.level as LoggerConfig['level'];
+    if ('pattern' in value) normalized.pattern = value.pattern as string;
+    if ('console' in value)
+        normalized.console = { ...(value.console as unknown as NonNullable<LoggerConfig['console']>) };
+    if ('file' in value) normalized.file = { ...(value.file as unknown as NonNullable<LoggerConfig['file']>) };
+    if (sensitiveValue !== undefined) {
+        const sensitive = sensitiveValue as unknown as SensitiveMaskingConfig;
+        normalized.sensitiveMasking = {
+            ...(sensitive.enabled !== undefined ? { enabled: sensitive.enabled } : {}),
+            ...(sensitive.fields !== undefined
+                ? { fields: sensitive.fields.map((field: SensitiveFieldConfig) => ({ ...field })) }
+                : {}),
+        };
+    }
+    return normalized;
+}
+
+function validateAndNormalizeConfig(value: unknown): { root: LoggerConfig; loggers: Record<string, LoggerConfig> } {
+    if (!isObject(value)) {
+        throw new ConfigError('Config is empty');
+    }
+    assertKnownKeys(value, ['root', 'loggers'], 'config');
+
+    const root = value.root === undefined ? {} : validateAndNormalizeLoggerConfig(value.root, 'root');
+    const loggers: Record<string, LoggerConfig> = Object.create(null) as Record<string, LoggerConfig>;
+    if (value.loggers !== undefined) {
+        assertObject(value.loggers, 'loggers');
+        for (const [name, loggerConfig] of Object.entries(value.loggers)) {
+            loggers[name] = validateAndNormalizeLoggerConfig(loggerConfig, `loggers.${name}`);
+        }
+    }
+    return { root, loggers };
+}
+
+function mergeEffectiveConfig(base: EffectiveLoggerConfig, override: LoggerConfig): EffectiveLoggerConfig {
+    return {
+        level: override.level ?? base.level,
+        pattern: override.pattern ?? base.pattern,
+        console: { ...base.console, ...(override.console ?? {}) },
+        file: { ...base.file, ...(override.file ?? {}) },
+        sensitiveMasking: {
+            enabled: override.sensitiveMasking?.enabled ?? base.sensitiveMasking.enabled,
+            fields: mergeSensitiveFields(base.sensitiveMasking.fields, override.sensitiveMasking?.fields),
+        },
+    };
+}
+
+function loadYamlFile(source: ConfigSource): unknown {
     try {
-        const content = readFileSync(filePath, 'utf-8');
-        return yamlParse(content) as Partial<ParsedConfig>;
+        return yamlParse(readFileSync(source.path, 'utf-8'));
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            throw new ConfigError(`Config file not found: ${filePath}`);
+            if (source.optional) return undefined;
+            throw new ConfigError(`Config file not found: ${source.path}`);
         }
         if (error instanceof Error && error.name === 'YAMLParseError') {
             throw new ConfigError(`Invalid YAML: ${error.message}`);
@@ -86,98 +185,64 @@ function loadYamlFile(filePath: string): Partial<ParsedConfig> {
     }
 }
 
-/**
- * 校验配置结构
- */
-function validateConfig(config: Partial<ParsedConfig>): void {
-    if (!config) {
-        throw new ConfigError('Config is empty');
+function resolveSource(configPath?: string): ConfigSource {
+    if (configPath !== undefined) return { path: configPath, optional: false };
+    const environmentPath = process.env[CONFIG_ENV_KEY];
+    if (environmentPath !== undefined && environmentPath !== '') {
+        return { path: environmentPath, optional: false };
     }
-
-    if (config.root) {
-        validateConfigValue(config.root, 'root');
-    }
-
-    if (config.loggers) {
-        for (const [name, loggerConfig] of Object.entries(config.loggers)) {
-            if (typeof name !== 'string') {
-                throw new ConfigError('Logger name must be a string');
-            }
-            if (loggerConfig) {
-                validateConfigValue(loggerConfig, `loggers.${name}`);
-            }
-        }
-    }
+    return { path: DEFAULT_CONFIG_PATH, optional: true };
 }
 
 export class ConfigLoader {
-    private static config: LoggerConfig | null = null;
-    private static loggerConfigs: Map<string, LoggerConfig> = new Map();
+    private static config: EffectiveLoggerConfig | null = null;
+    private static loggerConfigs: Map<string, EffectiveLoggerConfig> = new Map();
 
-    /**
-     * 获取配置文件路径
-     */
     static getConfigPath(): string {
-        return process.env[CONFIG_ENV_KEY] || DEFAULT_CONFIG_PATH;
+        return resolveSource().path;
     }
 
-    /**
-     * 加载并校验配置
-     */
-    static load(configPath?: string): LoggerConfig {
-        const path = configPath || this.getConfigPath();
-
-        const parsed = loadYamlFile(path);
-        validateConfig(parsed);
-
-        const rootConfig = mergeConfig(getDefaultConfig(), parsed.root || {});
-
-        this.config = rootConfig;
-        this.loggerConfigs.clear();
-
-        if (parsed.loggers) {
-            for (const [name, loggerPartial] of Object.entries(parsed.loggers)) {
-                const merged = mergeConfig(rootConfig, loggerPartial);
-                this.loggerConfigs.set(name, merged as LoggerConfig);
-            }
+    static load(configPath?: string): EffectiveLoggerConfig {
+        const source = resolveSource(configPath);
+        const parsedValue = loadYamlFile(source);
+        const normalized =
+            parsedValue === undefined ? { root: {}, loggers: {} } : validateAndNormalizeConfig(parsedValue);
+        const rootConfig = mergeEffectiveConfig(getDefaultConfig(), normalized.root);
+        const nextLoggerConfigs = new Map<string, EffectiveLoggerConfig>();
+        for (const [name, loggerConfig] of Object.entries(normalized.loggers)) {
+            nextLoggerConfigs.set(name, mergeEffectiveConfig(rootConfig, loggerConfig));
         }
 
+        this.config = rootConfig;
+        this.loggerConfigs = nextLoggerConfigs;
+        return rootConfig;
+    }
+
+    static useDefaultConfig(): EffectiveLoggerConfig {
+        const config = getDefaultConfig();
+        this.config = config;
+        this.loggerConfigs.clear();
+        return config;
+    }
+
+    static getConfig(): EffectiveLoggerConfig | null {
         return this.config;
     }
 
-    /**
-     * 获取已缓存的配置
-     */
-    static getConfig(): LoggerConfig | null {
-        return this.config;
+    static getLoggerConfig(name: string): EffectiveLoggerConfig | null {
+        return this.loggerConfigs.get(name) ?? null;
     }
 
-    /**
-     * 获取命名 Logger 的配置（已合并 root 配置）
-     */
-    static getLoggerConfig(name: string): LoggerConfig | null {
-        return this.loggerConfigs.get(name) || null;
-    }
-
-    /**
-     * 获取所有已注册的 Logger 名称
-     */
     static getLoggerNames(): string[] {
         return Array.from(this.loggerConfigs.keys());
     }
 
-    /**
-     * 清除缓存的配置（用于测试）
-     */
     static reset(): void {
         this.config = null;
         this.loggerConfigs.clear();
     }
 
-    /**
-     * 获取默认配置
-     */
-    static getDefaultConfig(): LoggerConfig {
+    static getDefaultConfig(): EffectiveLoggerConfig {
         return getDefaultConfig();
     }
 
