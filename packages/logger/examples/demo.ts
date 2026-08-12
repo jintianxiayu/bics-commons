@@ -20,6 +20,9 @@ function basicUsage() {
     logger.info('应用启动', { version: '1.0.0', env: 'production' });
     logger.warn('内存使用率较高', { usage: '85%' });
     logger.error('连接失败', { host: 'db.example.com', port: 5432 });
+
+    // 默认 plain pattern 包含 %{log_position}，输出 relative/path.ts:line:column。
+    // 下游采集规则升级期间应同时接受旧 path:line 与新 path:line:column。
 }
 
 /**

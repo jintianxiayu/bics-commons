@@ -8,7 +8,8 @@ import * as winston from 'winston';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const DailyRotateFile = require('winston-daily-rotate-file');
 import { ConfigLoader } from './ConfigLoader';
-import { LogPosition } from './LogPosition';
+import { LogPosition, UNKNOWN_LOG_POSITION } from './LogPosition';
+import { LOG_POSITION_SYMBOL, readLogPosition, type LogPositionMetadata } from './LogPositionMetadata';
 import { LoggerContext } from './LoggerContext';
 import { createMaskingPolicy, type MaskingPolicy } from './SensitiveMasker';
 import { normalizeMeta, safeStringify } from './MetaSerializer';
@@ -19,7 +20,20 @@ function serializeMeta(meta: unknown[], maskingPolicy: MaskingPolicy): unknown[]
     return meta.map((value) => normalizeMeta(value, maskingPolicy));
 }
 
+function createLogMetadata(
+    meta: unknown[],
+    maskingPolicy: MaskingPolicy,
+    needsLogPosition: boolean
+): { meta: unknown[] } & LogPositionMetadata {
+    const metadata: { meta: unknown[] } & LogPositionMetadata = {
+        meta: serializeMeta(meta, maskingPolicy),
+    };
+    if (needsLogPosition) metadata[LOG_POSITION_SYMBOL] = LogPosition.capture();
+    return metadata;
+}
+
 function createFormat(pattern: string): winston.Logform.Format {
+    const needsLogPosition = pattern.includes('%{log_position}');
     return winston.format.printf((info) => {
         const timestampStr = String(info.timestamp ?? '');
         const levelStr = String(info.level ?? '');
@@ -38,8 +52,8 @@ function createFormat(pattern: string): winston.Logform.Format {
 
         let result = pattern;
 
-        if (pattern.includes('%{log_position}')) {
-            replacements['%{log_position}'] = LogPosition.capture();
+        if (needsLogPosition) {
+            replacements['%{log_position}'] = readLogPosition(info) ?? UNKNOWN_LOG_POSITION;
         }
 
         if (pattern.includes('%{traceId}')) {
@@ -164,19 +178,23 @@ export class LoggerFactory {
 
         const winstonLogger = container.get(name);
         const maskingPolicy = createMaskingPolicy(config.sensitiveMasking);
+        const pattern = config.pattern || DEFAULT_PATTERN;
+        const needsLogPosition =
+            pattern.includes('%{log_position}') &&
+            ((config.console.enabled && config.console.format !== 'json') || config.file.enabled);
 
         const wrapper: LoggerInterface = {
             debug(message: string, ...meta: unknown[]): void {
-                winstonLogger.debug(message, { meta: serializeMeta(meta, maskingPolicy) });
+                winstonLogger.debug(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
             },
             info(message: string, ...meta: unknown[]): void {
-                winstonLogger.info(message, { meta: serializeMeta(meta, maskingPolicy) });
+                winstonLogger.info(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
             },
             warn(message: string, ...meta: unknown[]): void {
-                winstonLogger.warn(message, { meta: serializeMeta(meta, maskingPolicy) });
+                winstonLogger.warn(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
             },
             error(message: string, ...meta: unknown[]): void {
-                winstonLogger.error(message, { meta: serializeMeta(meta, maskingPolicy) });
+                winstonLogger.error(message, createLogMetadata(meta, maskingPolicy, needsLogPosition));
             },
         };
 

@@ -1,5 +1,6 @@
 import winston from 'winston';
 import { LogPosition } from '../core/LogPosition';
+import { readLogPosition } from '../core/LogPositionMetadata';
 import { normalizeMeta, safeStringify } from '../core/MetaSerializer';
 import { createMaskingPolicy } from '../core/SensitiveMasker';
 
@@ -24,7 +25,6 @@ const PLACEHOLDERS = {
         const metaStr = safeStringify(normalizeMeta(meta, NORMALIZATION_ONLY_POLICY));
         return metaStr === '{}' ? '' : metaStr;
     },
-    log_position: () => LogPosition.capture(),
 };
 
 /**
@@ -32,6 +32,7 @@ const PLACEHOLDERS = {
  * @param pattern - 格式化模板，支持 %{timestamp}, %{level}, %{name}, %{message}, %{meta}, %{log_position}
  */
 export const createPatternFormatter = (pattern: string): winston.Logform.Format => {
+    const needsLogPosition = pattern.includes('%{log_position}');
     return winston.format.printf((info) => {
         let result = pattern;
         for (const [key, resolver] of Object.entries(PLACEHOLDERS)) {
@@ -39,6 +40,9 @@ export const createPatternFormatter = (pattern: string): winston.Logform.Format 
             if (result.includes(placeholder)) {
                 result = result.replaceAll(placeholder, resolver(info)?.toString() || '');
             }
+        }
+        if (needsLogPosition) {
+            result = result.replaceAll('%{log_position}', readLogPosition(info) ?? LogPosition.capture());
         }
         return result;
     });

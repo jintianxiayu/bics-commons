@@ -135,6 +135,10 @@ root:
 | `%{message}`      | 日志消息                         |
 | `%{meta}`         | 元数据（JSON 字符串）            |
 
+`%{log_position}` 的稳定格式为 `relative/path.ts:line:column`，路径相对于日志捕获时的当前工作目录并统一使用 `/`。调用文件位于工作目录外时只保留安全文件名；栈不可用、解析失败或没有外部调用帧时输出 `unknown:0:0`，不会让日志调用抛错，也不会修改全局 `Error.stackTraceLimit`。
+
+位置只在启用的 plain console 或 file pattern 实际包含 `%{log_position}` 时，于 Logger API 的调用边界捕获一次；同一条日志中的多个位置占位符和多个 plain transport 复用该值。JSON 模式和不含该占位符的 pattern 不捕获调用栈。
+
 ## Meta 安全序列化
 
 logger 会在脱敏后、交给 formatter 前创建一次有界的 JSON-compatible 快照。plain 模式中 `%{meta}` 的 JSON 文本与 JSON 模式顶层 `meta` 字段采用相同语义；输入对象不会被修改，自定义 `toJSON` 也不会被调用。
