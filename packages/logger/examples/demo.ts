@@ -71,6 +71,27 @@ function sensitiveDataUsage() {
 }
 
 /**
+ * 示例：特殊 meta 值的安全序列化
+ */
+function safeMetaUsage() {
+    console.log('\n========== Meta 安全序列化 ==========\n');
+
+    const logger = LoggerFactory.getLogger('safe-meta');
+    const cause = new Error('上游请求失败');
+    const error = new Error('任务执行失败');
+    Object.defineProperty(error, 'cause', { value: cause });
+    const meta: Record<string, unknown> = {
+        requestId: 9007199254740993n,
+        occurredAt: new Date('2026-08-13T01:02:03.000Z'),
+        error,
+        token: 'raw-token', // 特殊值遍历前仍会优先脱敏
+    };
+    meta.self = meta; // 输出 [Circular]，不会抛出异常
+
+    logger.error('安全记录特殊 meta', meta);
+}
+
+/**
  * 示例：多 Logger 命名空间
  */
 function multiLoggerUsage() {
@@ -105,6 +126,7 @@ async function main() {
         basicUsage();
         traceIdUsage();
         sensitiveDataUsage();
+        safeMetaUsage();
         multiLoggerUsage();
         await gracefulShutdown();
     } catch (error) {

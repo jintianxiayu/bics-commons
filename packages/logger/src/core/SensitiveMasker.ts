@@ -2,9 +2,16 @@
 
 import type { SensitiveFieldConfig, SensitiveMaskingConfig } from '../types';
 import { DEFAULT_SENSITIVE_FIELDS, mergeSensitiveFields } from '../config/defaultConfig';
+import { normalizeMeta } from './MetaSerializer';
+
+export interface MaskFieldResult {
+    readonly matched: boolean;
+    readonly value: string;
+}
 
 export interface MaskingPolicy {
     readonly enabled: boolean;
+    maskField(field: string, value: unknown): MaskFieldResult;
     mask(obj: unknown): unknown;
 }
 
@@ -12,8 +19,6 @@ interface RenderContext {
     fieldLookup: Map<string, SensitiveFieldConfig>;
     rendererCache: Map<string, (value: string) => string>;
 }
-
-const MAX_DEPTH = 5;
 
 function applyPlaceholder(value: string, placeholder: string): string {
     if (value === '') return '';
@@ -58,36 +63,12 @@ function createRenderer(context: RenderContext, template: string): (value: strin
 }
 
 function maskValue(context: RenderContext, value: unknown, config: SensitiveFieldConfig): string {
-    const strValue = value === null ? 'null' : value === undefined ? 'undefined' : String(value);
     try {
+        const strValue = value === null ? 'null' : value === undefined ? 'undefined' : String(value);
         return createRenderer(context, config.mask)(strValue);
     } catch {
-        return '*'.repeat(Math.min(strValue.length, 12));
+        return '********';
     }
-}
-
-function maskObject(context: RenderContext, obj: unknown, depth = 0): unknown {
-    if (depth > MAX_DEPTH) return '[MAX_DEPTH_EXCEEDED]';
-    if (obj === null || obj === undefined) return obj;
-    if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') return obj;
-    if (Array.isArray(obj)) return obj.map((item) => maskObject(context, item, depth + 1));
-
-    if (typeof obj === 'object') {
-        const result: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(obj)) {
-            const fieldConfig = context.fieldLookup.get(key);
-            if (fieldConfig) {
-                result[key] = maskValue(context, value, fieldConfig);
-            } else if (value !== null && typeof value === 'object') {
-                result[key] = maskObject(context, value, depth + 1);
-            } else {
-                result[key] = value;
-            }
-        }
-        return result;
-    }
-
-    return obj;
 }
 
 export function createMaskingPolicy(config?: SensitiveMaskingConfig): MaskingPolicy {
@@ -98,10 +79,17 @@ export function createMaskingPolicy(config?: SensitiveMaskingConfig): MaskingPol
         rendererCache: new Map(),
     };
 
-    return Object.freeze({
+    const policy: MaskingPolicy = {
         enabled,
-        mask(obj: unknown): unknown {
-            return enabled ? maskObject(context, obj) : obj;
+        maskField(field: string, value: unknown): MaskFieldResult {
+            if (!enabled) return { matched: false, value: '' };
+            const fieldConfig = context.fieldLookup.get(field);
+            if (!fieldConfig) return { matched: false, value: '' };
+            return { matched: true, value: maskValue(context, value, fieldConfig) };
         },
-    });
+        mask(obj: unknown): unknown {
+            return normalizeMeta(obj, policy);
+        },
+    };
+    return Object.freeze(policy);
 }

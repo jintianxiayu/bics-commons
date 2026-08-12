@@ -1,5 +1,9 @@
 import winston from 'winston';
 import { LogPosition } from '../core/LogPosition';
+import { normalizeMeta, safeStringify } from '../core/MetaSerializer';
+import { createMaskingPolicy } from '../core/SensitiveMasker';
+
+const NORMALIZATION_ONLY_POLICY = createMaskingPolicy({ enabled: false });
 
 /**
  * Pattern 占位符解析器映射
@@ -17,7 +21,7 @@ const PLACEHOLDERS = {
                 meta[key] = info[key];
             }
         }
-        const metaStr = JSON.stringify(meta);
+        const metaStr = safeStringify(normalizeMeta(meta, NORMALIZATION_ONLY_POLICY));
         return metaStr === '{}' ? '' : metaStr;
     },
     log_position: () => LogPosition.capture(),

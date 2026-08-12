@@ -107,6 +107,19 @@ describe('SensitiveMasker', () => {
                 ],
             });
         });
+
+        it('normalizes special values, errors, and cycles while masking nested fields', () => {
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            const error = new Error('diagnostic') as Error & { password: bigint };
+            error.password = 123n;
+            const cyclic: Record<string, unknown> = { password: new Date('2026-08-13T00:00:00.000Z') };
+            cyclic.self = cyclic;
+
+            expect(policy.mask({ error, cyclic })).toMatchObject({
+                error: { name: 'Error', message: 'diagnostic', password: '********' },
+                cyclic: { password: '********', self: '[Circular]' },
+            });
+        });
     });
 
     describe('switch control', () => {
@@ -118,8 +131,16 @@ describe('SensitiveMasker', () => {
 
         it('should not mask when disabled', () => {
             policy = createMaskingPolicy({ enabled: false });
-            const result = policy.mask({ password: 'secret' });
-            expect(result).toEqual({ password: 'secret' });
+            const result = policy.mask({ password: 'secret', count: 1n });
+            expect(result).toEqual({ password: 'secret', count: '1' });
+        });
+
+        it('uses exact case-sensitive matching for field-level masks', () => {
+            policy = createMaskingPolicy({ fields: [{ field: 'password', mask: '********' }] });
+            expect(policy.mask({ password: 'secret', Password: 2n })).toEqual({
+                password: '********',
+                Password: '2',
+            });
         });
     });
 

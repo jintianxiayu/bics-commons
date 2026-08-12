@@ -11,19 +11,12 @@ import { ConfigLoader } from './ConfigLoader';
 import { LogPosition } from './LogPosition';
 import { LoggerContext } from './LoggerContext';
 import { createMaskingPolicy, type MaskingPolicy } from './SensitiveMasker';
+import { normalizeMeta, safeStringify } from './MetaSerializer';
 import { getDefaultConfig, DEFAULT_PATTERN } from '../config/defaultConfig';
 import type { EffectiveLoggerConfig, LoggerInterface, ShutdownOptions } from '../types';
 
 function serializeMeta(meta: unknown[], maskingPolicy: MaskingPolicy): unknown[] {
-    return meta.map((m) => {
-        if (m instanceof Error) {
-            return { message: m.message, stack: m.stack };
-        }
-        if (m !== null && typeof m === 'object') {
-            return maskingPolicy.mask(m);
-        }
-        return m;
-    });
+    return meta.map((value) => normalizeMeta(value, maskingPolicy));
 }
 
 function createFormat(pattern: string): winston.Logform.Format {
@@ -33,7 +26,7 @@ function createFormat(pattern: string): winston.Logform.Format {
         const nameStr = String(info.name ?? '');
         const messageStr = String(info.message ?? '');
         const metaObj = info.meta as unknown;
-        const metaStr = JSON.stringify(metaObj ?? {});
+        const metaStr = safeStringify(metaObj ?? {});
 
         const replacements: Record<string, string> = {
             '%{timestamp}': timestampStr,

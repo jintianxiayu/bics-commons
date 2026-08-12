@@ -135,6 +135,43 @@ root:
 | `%{message}`      | 日志消息                         |
 | `%{meta}`         | 元数据（JSON 字符串）            |
 
+## Meta 安全序列化
+
+logger 会在脱敏后、交给 formatter 前创建一次有界的 JSON-compatible 快照。plain 模式中 `%{meta}` 的 JSON 文本与 JSON 模式顶层 `meta` 字段采用相同语义；输入对象不会被修改，自定义 `toJSON` 也不会被调用。
+
+| 输入值                                              | 输出表示                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------- |
+| `null`、boolean、有限 number、string、普通数组/对象 | 保持结构和值                                                           |
+| BigInt                                              | 十进制字符串，例如 `9007199254740993n` → `"9007199254740993"`          |
+| `NaN`、`Infinity`、`-Infinity`                      | `"NaN"`、`"Infinity"`、`"-Infinity"`                                   |
+| `undefined`                                         | `"[Undefined]"`                                                        |
+| symbol                                              | `String(value)`，例如 `"Symbol(id)"`                                   |
+| function                                            | `"[Function: name]"`，无名称时使用 `anonymous`                         |
+| 有效 / 无效 Date                                    | UTC ISO 8601 字符串 / `"[Invalid Date]"`                               |
+| Error                                               | 包含 `name`、`message`，以及可用的 `stack`、`cause` 和可枚举自定义字段 |
+
+防御性降级标记如下：
+
+- 回到当前祖先的循环引用：`[Circular]`。同级共享引用会分别完整输出，不会误判为循环。
+- 超过最大深度 5 的复合值：`[MAX_DEPTH_EXCEEDED]`。
+- 单个属性 getter 读取失败：`[Property Access Error]`；其他属性仍继续处理。
+- 整个对象无法枚举：`[Unserializable]`。
+
+上述占位符不会拼接 getter 或 Proxy 抛出的错误消息。敏感字段按字段名精确匹配，并在 Date、BigInt、Error 或循环子树展开前优先替换为 mask，因此安全降级不会暴露原始敏感值。设置 `sensitiveMasking.enabled: false` 只关闭替换，安全规范化仍然生效。
+
+```typescript
+const logger = LoggerFactory.getLogger('worker');
+const meta: Record<string, unknown> = {
+    requestId: 9007199254740993n,
+    occurredAt: new Date('2026-08-13T01:02:03.000Z'),
+    error: new Error('request failed'),
+    token: 'raw-token', // 先脱敏，再序列化
+};
+meta.self = meta;
+
+logger.error('job failed', meta); // 不会因 BigInt 或循环引用抛出序列化异常
+```
+
 ## API
 
 ### LoggerFactory.getLogger(name: string)
@@ -326,7 +363,9 @@ app.use((req, res, next) => {
 
 ### 灰度与回滚
 
-建议先发布 prerelease，在真实服务中验证自定义字段、命名 logger 覆盖以及日志采集格式。若局部脱敏模板影响排查，可临时对指定命名 logger 设置 `sensitiveMasking.enabled: false`；若配置兼容出现整体问题，应回滚 logger 包版本，不建议在生产环境全局关闭默认脱敏。
+建议先发布 prerelease，在真实服务中验证自定义字段、命名 logger 覆盖以及日志采集格式。对比升级前后的日志解析失败率、事件丢弃数量、平均日志体积、特殊值字段类型，并扫描原始敏感值是否泄露；普通 meta、Error、BigInt、Date 和循环样本都应纳入对比。
+
+若局部脱敏模板影响排查，可临时对指定命名 logger 设置 `sensitiveMasking.enabled: false`；若特殊值表示或配置兼容出现整体问题，应回滚 logger 包版本，应用侧可临时显式预处理特殊字段，但不建议在生产环境全局关闭默认脱敏。回滚不需要配置或数据迁移。
 
 ## TraceContext - traceId 追踪
 
