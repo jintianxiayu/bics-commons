@@ -12,7 +12,7 @@
     "format": "prettier --write \"packages/**/*.{ts,js,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,js,json,md}\"",
     "lint": "eslint packages --ext .ts",
-    "publish": "lerna publish"
+    "publish": "npm run build && lerna publish"
   },
   "devDependencies": {
     "jest": "^29.7.0",
