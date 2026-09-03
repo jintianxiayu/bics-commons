@@ -1,5 +1,4 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, test } from '@jest/globals';
 import type winston from 'winston';
 import { LoggerShutdownTimeoutError } from '../../src/core/errors';
 import { shutdownWinstonLogger } from '../../src/core/shutdown';

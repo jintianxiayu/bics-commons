@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { describe, test } from '@jest/globals';
 import { LoggerContext } from '../../src/core/LoggerContext';
 
 function delay(milliseconds: number): Promise<void> {

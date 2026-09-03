@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, test } from '@jest/globals';
 import { ConfigLoader } from '../../src/core/ConfigLoader';
 import { LoggerContext } from '../../src/core/LoggerContext';
 import { LoggerFactoryRuntime } from '../../src/core/LoggerFactory';

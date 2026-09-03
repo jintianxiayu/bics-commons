@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { afterEach, describe, test } from '@jest/globals';
 import { join } from 'node:path';
 import { DEFAULT_PATTERN } from '../../src/config/defaultConfig';
 import { ConfigLoader } from '../../src/core/ConfigLoader';

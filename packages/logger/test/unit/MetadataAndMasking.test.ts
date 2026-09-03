@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { describe, expect, test } from '@jest/globals';
 import { normalizeMetadata } from '../../src/core/MetadataNormalizer';
 import { SensitiveMasker } from '../../src/core/SensitiveMasker';
 

@@ -1,5 +1,4 @@
 import assert from 'node:assert';
-import { describe, test } from '@jest/globals';
 import type { SafeLogEvent } from '../../src/core/model';
 import { captureLogPosition } from '../../src/core/LogPosition';
 import { LoggerConfigError } from '../../src/core/errors';

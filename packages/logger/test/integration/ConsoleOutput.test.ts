@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { afterEach, test } from '@jest/globals';
 import { createTempDirectory, removeTempDirectory, writeConfig } from '../helpers';
 
 const temporaryDirectories: string[] = [];
