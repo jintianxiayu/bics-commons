@@ -1,0 +1,8 @@
+packages:
+    - 'packages/*'
+
+linkWorkspacePackages: true
+
+versioning:
+    changelog:
+        storage: repository

@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-npm install @jintianxiayu/cache-decorator reflect-metadata
+pnpm add @jintianxiayu/cache-decorator reflect-metadata ioredis
 ```
 
 ## 特性

@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-npm install @jintianxiayu/lock-decorator reflect-metadata
+pnpm add @jintianxiayu/lock-decorator reflect-metadata ioredis
 ```
 
 ## 特性

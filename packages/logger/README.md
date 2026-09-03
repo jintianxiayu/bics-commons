@@ -15,7 +15,7 @@ SLF4J 风格的日志工厂，基于 Winston 实现。
 ## 安装
 
 ```bash
-npm install @jintianxiayu/logger
+pnpm add @jintianxiayu/logger
 ```
 
 ## 快速开始
@@ -49,7 +49,7 @@ logger.info('user logged in', {
 运行示例：
 
 ```bash
-npx ts-node examples/demo.ts
+pnpm dlx ts-node examples/demo.ts
 ```
 
 ## 配置

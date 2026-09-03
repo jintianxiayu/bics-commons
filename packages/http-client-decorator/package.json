@@ -8,7 +8,7 @@
         "build": "tsc",
         "test": "jest",
         "lint": "eslint src --ext .ts",
-        "clean": "rm -rf dist"
+        "clean": "rimraf dist"
     },
     "files": [
         "dist"
@@ -18,12 +18,10 @@
         "reflect-metadata": "^0.2.2"
     },
     "peerDependencies": {
-        "@jintianxiayu/logger": "*"
+        "@jintianxiayu/logger": "workspace:^"
     },
     "devDependencies": {
-        "@jintianxiayu/logger": "^0.1.3",
-        "axios-mock-adapter": "^2.1.0",
-        "ts-jest": "^29.2.5"
+        "@jintianxiayu/logger": "workspace:^"
     },
     "publishConfig": {
         "access": "public"

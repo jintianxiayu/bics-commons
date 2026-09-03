@@ -16,7 +16,7 @@
 ## 安装
 
 ```bash
-npm install @jintianxiayu/http-client-decorator
+pnpm add @jintianxiayu/http-client-decorator
 ```
 
 ## 快速开始
@@ -287,4 +287,3 @@ class HttpError extends Error {
 ## License
 
 MIT
-

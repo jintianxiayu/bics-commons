@@ -2,8 +2,8 @@
  * @jintianxiayu/logger 使用示例
  *
  * 运行方式：
- * 1. 直接运行: npx ts-node examples/demo.ts
- * 2. 或编译后运行: npm run build && node dist/examples/demo.js
+ * 1. 直接运行: pnpm dlx ts-node examples/demo.ts
+ * 2. 或编译后运行: pnpm run build && node dist/examples/demo.js
  */
 
 import { LoggerFactory, LoggerContext } from '../src';

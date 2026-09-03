@@ -5,7 +5,7 @@
     "lib": [
       "ES2021"
     ],
-    "types": ["node", "jest"],
+    "types": ["node"],
     // ----- 严格类型检查  -----
     "strict": true,
     "noImplicitReturns": true,

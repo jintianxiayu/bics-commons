@@ -1,6 +1,6 @@
 # bics-commons
 
-TypeScript 工具库 monorepo，基于 Lerna + NPM Workspaces 管理。提供日志、缓存、HTTP 客户端、分布式锁等通用基础设施装饰器。
+TypeScript 工具库 monorepo，基于 pnpm workspace 管理。提供日志、缓存、HTTP 客户端、分布式锁等通用基础设施装饰器。
 
 ## 包列表
 
@@ -16,28 +16,60 @@ TypeScript 工具库 monorepo，基于 Lerna + NPM Workspaces 管理。提供日
 ### 安装依赖
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 构建所有包
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 ### 运行测试
 
 ```bash
-npm test
+pnpm test
 ```
 
 ### 代码质量
 
 ```bash
-npm run format:check   # Prettier 格式检查
-npm run lint           # ESLint 检查
-npm run format         # 自动格式化
+pnpm run format:check   # Prettier 格式检查
+pnpm run lint           # ESLint 检查
+pnpm run format         # 自动格式化
 ```
+
+## 本地手工发布
+
+每次需要发布的变更先记录 change intent，并将生成的 `.changeset` 文件随代码提交：
+
+```bash
+pnpm change
+pnpm run release:status
+```
+
+在 `master` 分支且工作区干净、已同步远端时执行发布：
+
+```bash
+# 1. 预览并应用各子包的独立版本升级
+pnpm run release:version:dry-run
+pnpm run release:version
+
+# 2. 检查版本、changelog 和锁文件，然后提交并推送
+git add -A
+git commit -m "chore(release): publish packages"
+git push
+
+# 3. 预演并正式发布 Registry 中尚不存在的包版本
+pnpm run release:publish:dry-run
+pnpm run release:publish
+
+# 4. 发布成功后为本次升级的包创建并推送 Git 标签
+pnpm run release:tag
+git push origin --tags
+```
+
+标签格式为 `@scope/package@version`。`pnpm version -r` 会根据 change intent 独立升级各包，并同步 workspace 内部依赖版本。
 
 ## 项目结构
 
@@ -49,8 +81,9 @@ bics-commons/
 │   ├── http-client-decorator/ # @jintianxiayu/http-client-decorator
 │   └── lock-decorator/        # @jintianxiayu/lock-decorator
 ├── openspec/                  # OpenSpec 变更追踪文档
-├── lerna.json                 # Lerna 配置（independent 版本模式）
-├── package.json               # 根 workspace 配置
+├── package.json               # 根包配置
+├── pnpm-workspace.yaml        # pnpm workspace 配置
+├── scripts/                   # 本地发布辅助脚本
 ├── tsconfig.base.json         # 基础 TypeScript 配置
 ├── eslint.config.mjs          # ESLint 配置
 └── .prettierrc                # Prettier 配置
@@ -58,9 +91,9 @@ bics-commons/
 
 ## 技术栈
 
-- **包管理**: Lerna 9 + NPM Workspaces（independent 版本模式）
+- **包管理与发布**: pnpm 11 workspace（change intent + independent versioning）
 - **语言**: TypeScript 6.0+（target ES2021）
-- **代码质量**: ESLint 9 + Prettier 3
+- **代码质量**: ESLint 10 + Prettier 3
 - **测试**: Jest 29 + ts-jest
 - **装饰器**: experimentalDecorators + emitDecoratorMetadata
 - **模块系统**: NodeNext（CJS 输出）

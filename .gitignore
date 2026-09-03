@@ -1,5 +1,5 @@
 node_modules/
-.lerna/
+.pnpm-store/
 dist/
 *.log
 .DS_Store
