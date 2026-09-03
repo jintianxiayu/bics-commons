@@ -1,5 +1,4 @@
-import { executeMiddlewareChain } from '../src';
-import type { HttpContext } from '../src';
+import { executeMiddlewareChain, type HttpContext } from '../src';
 
 describe('中间件链执行顺序', () => {
     it('should execute middlewares in order (onion model)', async () => {
@@ -38,6 +37,7 @@ describe('中间件链执行顺序', () => {
     });
 
     it('should pass context state between middlewares', async () => {
+        let handlerCalled = false;
         const ctx: HttpContext = {
             request: { method: 'GET', url: '/test', headers: {} },
             state: {},
@@ -54,11 +54,14 @@ describe('中间件链执行顺序', () => {
         };
 
         const handler = async () => {
-            expect(ctx.state.fromA).toBe('a');
-            expect(ctx.state.fromB).toBe('b');
+            handlerCalled = true;
         };
 
         await executeMiddlewareChain(ctx, [middlewareA, middlewareB], handler);
+
+        expect(handlerCalled).toBe(true);
+        expect(ctx.state.fromA).toBe('a');
+        expect(ctx.state.fromB).toBe('b');
     });
 
     it('should allow middleware to short-circuit by not calling next', async () => {

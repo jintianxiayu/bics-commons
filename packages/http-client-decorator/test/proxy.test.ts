@@ -1,75 +1,65 @@
 import 'reflect-metadata';
-import { HttpClient, Get } from '../src';
+import axios from 'axios';
+import { HttpClient, Get, Post, Path, Query, Body, Header } from '../src';
+
+jest.mock('axios');
+
+const mockedAxios = jest.mocked(axios);
 
 describe('代理方法拦截', () => {
-    it('should return a proxy instance when constructing with @HttpClient', () => {
-        @HttpClient({ baseURL: 'https://api.example.com' })
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        class UserService {}
-
-        const service = new UserService();
-        expect(service).toBeInstanceOf(UserService);
+    beforeEach(() => {
+        mockedAxios.mockReset();
+        mockedAxios.mockResolvedValue({ status: 200, data: { id: 'remote' }, headers: {} } as never);
     });
 
-    it('should intercept decorated methods', async () => {
+    it('should intercept decorated methods while preserving local methods', async () => {
+        let originalCallCount = 0;
+
         @HttpClient({ baseURL: 'https://api.example.com' })
-        class TestService {
+        class UserService {
             @Get('/users/:id')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            getUser(_id: string): Promise<unknown> {
-                return Promise.resolve({ id: 'test' });
+            async getUser(@Path('id') _id: string): Promise<unknown> {
+                originalCallCount++;
+                return { id: 'local' };
+            }
+
+            getSource(): string {
+                return 'local';
             }
         }
 
-        const service = new TestService();
-        expect(typeof (service as unknown as { getUser: unknown }).getUser).toBe('function');
-    });
-});
+        const service = new UserService();
 
-describe('参数映射', () => {
-    it('should build correct URL with path params', async () => {
-        const baseURL = 'https://api.example.com';
-        const path = '/users/:id';
-        const pathParams: Record<string, string> = { id: '123' };
-
-        let resultPath = path;
-        for (const [key, value] of Object.entries(pathParams)) {
-            resultPath = resultPath.replace(`:${key}`, value);
-        }
-        const url = new URL(resultPath, baseURL).toString();
-
-        expect(url).toBe('https://api.example.com/users/123');
+        await expect(service.getUser('123')).resolves.toEqual({ id: 'remote' });
+        expect(originalCallCount).toBe(0);
+        expect(service.getSource()).toBe('local');
     });
 
-    it('should build correct URL with query params', async () => {
-        const baseURL = 'https://api.example.com';
-        const path = '/users';
-        const queryParams: Record<string, string> = { page: '1', size: '10' };
-
-        const url = new URL(path, baseURL);
-        for (const [key, value] of Object.entries(queryParams)) {
-            url.searchParams.set(key, value);
+    it('should map path, query, header, and body arguments into the actual request', async () => {
+        @HttpClient({ baseURL: 'https://api.example.com/', headers: { 'x-client': 'test' } })
+        class UserService {
+            @Post('/users/:id')
+            async updateUser(
+                @Path('id') _id: string,
+                @Query('expand') _expand: string,
+                @Header('authorization') _authorization: string,
+                @Body() _body: unknown
+            ): Promise<unknown> {
+                throw new Error('Original method should not execute');
+            }
         }
 
-        expect(url.toString()).toBe('https://api.example.com/users?page=1&size=10');
-    });
+        const body = { name: 'Alice' };
+        const result = await new UserService().updateUser('123', 'true', 'Bearer token', body);
 
-    it('should combine path and query params', async () => {
-        const baseURL = 'https://api.example.com';
-        const path = '/users/:id';
-        const pathParams: Record<string, string> = { id: '123' };
-        const queryParams: Record<string, string> = { expand: 'true' };
-
-        let resultPath = path;
-        for (const [key, value] of Object.entries(pathParams)) {
-            resultPath = resultPath.replace(`:${key}`, value);
-        }
-
-        const url = new URL(resultPath, baseURL);
-        for (const [key, value] of Object.entries(queryParams)) {
-            url.searchParams.set(key, value);
-        }
-
-        expect(url.toString()).toBe('https://api.example.com/users/123?expand=true');
+        expect(result).toEqual({ id: 'remote' });
+        expect(mockedAxios).toHaveBeenCalledWith({
+            method: 'POST',
+            url: 'https://api.example.com/users/123?expand=true',
+            headers: { 'x-client': 'test', authorization: 'Bearer token' },
+            data: body,
+            timeout: undefined,
+            validateStatus: expect.any(Function),
+        });
     });
 });

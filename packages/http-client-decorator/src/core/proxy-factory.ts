@@ -4,8 +4,7 @@ import { getMethodMetadata } from '../decorators/http-methods';
 import { getParamMetadata } from '../decorators/params';
 import type { HttpClientConfig, TracingOptions, DebugOptions } from './http-client-config';
 import { createHttpRequest } from './http-client';
-import { executeMiddlewareChain } from './middleware';
-import type { HttpContext, Middleware } from './middleware';
+import { executeMiddlewareChain, type HttpContext, type Middleware } from './middleware';
 import { createTracingMiddleware } from '../middlewares/tracing';
 import { createDebugMiddleware } from '../middlewares/debug';
 

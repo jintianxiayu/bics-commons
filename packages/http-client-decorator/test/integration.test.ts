@@ -1,77 +1,113 @@
 import 'reflect-metadata';
+import axios from 'axios';
 import { HttpClient, Get, Post, Put, Delete, Path, Query, Body, HttpError } from '../src';
 
+jest.mock('axios');
+
+const mockedAxios = jest.mocked(axios);
+
+function mockResponse(status: number, data: unknown): void {
+    mockedAxios.mockResolvedValue({ status, data, headers: {} } as never);
+}
+
 describe('集成测试：完整 HTTP 请求流程', () => {
+    beforeEach(() => {
+        mockedAxios.mockReset();
+    });
+
     it('should throw HttpError on 404', async () => {
+        mockResponse(404, { message: 'User not found' });
+
         @HttpClient({ baseURL: 'https://api.example.com' })
         class UserService {
             @Get('/users/:id')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            getUser(@Path('id') _id: string): Promise<unknown> {
-                return Promise.resolve({ id: '123' });
+            async getUser(@Path('id') _id: string): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
         }
 
         const service = new UserService();
-        expect(service).toBeInstanceOf(UserService);
-        expect(typeof (service as unknown as { getUser: unknown }).getUser).toBe('function');
+
+        await expect(service.getUser('missing')).rejects.toMatchObject<HttpError>({
+            name: 'HttpError',
+            status: 404,
+            data: { message: 'User not found' },
+            message: 'HTTP 404: https://api.example.com/users/missing',
+        });
+        expect(mockedAxios).toHaveBeenCalledWith(
+            expect.objectContaining({ method: 'GET', url: 'https://api.example.com/users/missing' })
+        );
     });
 
-    it('should throw HttpError on HTTP error status', async () => {
-        const error = new HttpError(500, { message: 'Server error' }, 'HTTP 500');
+    it('should execute decorated methods with their HTTP methods and mapped arguments', async () => {
+        mockResponse(200, { success: true });
 
-        expect(error.status).toBe(500);
-        expect(error.data).toEqual({ message: 'Server error' });
-        expect(error.message).toBe('HTTP 500');
-        expect(error.name).toBe('HttpError');
-    });
-
-    it('should create decorated class with multiple decorators', async () => {
         @HttpClient({ baseURL: 'https://api.example.com' })
         class ArticleService {
             @Get('/articles/:slug')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            getArticle(@Path('slug') _slug: string, @Query('lang') _lang: string): Promise<unknown> {
-                return Promise.resolve({ slug: 'test' });
+            async getArticle(@Path('slug') _slug: string, @Query('lang') _lang: string): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
 
             @Post('/articles')
-            createArticle(@Body() _body: unknown): Promise<unknown> {
-                return Promise.resolve({ id: 1 });
+            async createArticle(@Body() _body: unknown): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
 
             @Put('/articles/:id')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            updateArticle(@Path('id') _id: string, @Body() _body: unknown): Promise<unknown> {
-                return Promise.resolve({ id: 1 });
+            async updateArticle(@Path('id') _id: string, @Body() _body: unknown): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
 
             @Delete('/articles/:id')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            deleteArticle(@Path('id') _id: string): Promise<unknown> {
-                return Promise.resolve({ success: true });
+            async deleteArticle(@Path('id') _id: string): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
         }
 
         const service = new ArticleService();
-        expect(service).toBeInstanceOf(ArticleService);
-        expect(typeof (service as unknown as { getArticle: unknown }).getArticle).toBe('function');
-        expect(typeof (service as unknown as { createArticle: unknown }).createArticle).toBe('function');
-        expect(typeof (service as unknown as { updateArticle: unknown }).updateArticle).toBe('function');
-        expect(typeof (service as unknown as { deleteArticle: unknown }).deleteArticle).toBe('function');
+        const createdArticle = { title: 'New article' };
+        const updatedArticle = { title: 'Updated article' };
+
+        await expect(service.getArticle('welcome', 'zh-CN')).resolves.toEqual({ success: true });
+        await expect(service.createArticle(createdArticle)).resolves.toEqual({ success: true });
+        await expect(service.updateArticle('42', updatedArticle)).resolves.toEqual({ success: true });
+        await expect(service.deleteArticle('42')).resolves.toEqual({ success: true });
+
+        expect(mockedAxios).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({ method: 'GET', url: 'https://api.example.com/articles/welcome?lang=zh-CN' })
+        );
+        expect(mockedAxios).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({ method: 'POST', url: 'https://api.example.com/articles', data: createdArticle })
+        );
+        expect(mockedAxios).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({ method: 'PUT', url: 'https://api.example.com/articles/42', data: updatedArticle })
+        );
+        expect(mockedAxios).toHaveBeenNthCalledWith(
+            4,
+            expect.objectContaining({ method: 'DELETE', url: 'https://api.example.com/articles/42' })
+        );
     });
 
-    it('should allow multiple @Path parameters', async () => {
+    it('should map multiple @Path parameters into one request URL', async () => {
+        mockResponse(200, { repository: true });
+
         @HttpClient({ baseURL: 'https://api.example.com' })
         class NestedService {
             @Get('/orgs/:orgId/repos/:repoId')
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            getNested(@Path('orgId') _orgId: string, @Path('repoId') _repoId: string): Promise<unknown> {
-                return Promise.resolve({});
+            async getNested(@Path('orgId') _orgId: string, @Path('repoId') _repoId: string): Promise<unknown> {
+                throw new Error('Original method should not execute');
             }
         }
 
-        const service = new NestedService();
-        expect(service).toBeInstanceOf(NestedService);
+        const result = await new NestedService().getNested('openai', 'codex');
+
+        expect(result).toEqual({ repository: true });
+        expect(mockedAxios).toHaveBeenCalledWith(
+            expect.objectContaining({ method: 'GET', url: 'https://api.example.com/orgs/openai/repos/codex' })
+        );
     });
 });

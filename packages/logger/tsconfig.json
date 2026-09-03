@@ -1,8 +1,12 @@
 {
     "extends": "../../tsconfig.base.json",
     "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["ES2022"],
         "outDir": "./dist",
-        "rootDir": "./src"
+        "rootDir": "./src",
+        "exactOptionalPropertyTypes": true,
+        "isolatedModules": true
     },
     "include": ["src/**/*"]
 }

@@ -35,6 +35,17 @@ describe('PendingCache', () => {
 
             expect(pendingCache.get('key1')).toBeUndefined();
         });
+
+        it('应在 Promise 拒绝时自动删除且保留原始异常', async () => {
+            const expectedError = new Error('request failed');
+            const promise = Promise.reject(expectedError);
+
+            pendingCache.set('key1', promise);
+
+            await expect(promise).rejects.toBe(expectedError);
+            await Promise.resolve();
+            expect(pendingCache.get('key1')).toBeUndefined();
+        });
     });
 
     describe('delete', () => {

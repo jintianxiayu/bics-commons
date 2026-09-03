@@ -11,12 +11,35 @@ import {
     DEFAULT_RETRY_DELAY,
 } from '../core/lock-provider';
 
+/** 获取锁重试过程使用稳定参数快照，避免调用点依赖位置参数顺序。 */
+interface LockAcquisitionRequest {
+    readonly provider: LockProvider;
+    readonly key: string;
+    readonly ttl: number;
+    readonly retryCount: number;
+    readonly retryDelay: number;
+}
+
+/** 看门狗启动参数与 Watchdog 构造契约保持一致。 */
+interface WatchdogStartRequest {
+    readonly provider: LockProvider;
+    readonly key: string;
+    readonly token: string;
+    readonly ttl: number;
+    readonly interval: number;
+}
+
 /**
  * 分布式锁装饰器
  * 自动完成加锁→业务执行→释放锁的全流程，支持看门狗自动续期
  * @param options 装饰器配置选项
+ * @returns 用于包装异步实例方法的属性描述符装饰器。
+ * @throws {TypeError} 当目标方法不是异步方法时抛出。
+ * @throws {LockAcquisitionError} 当超过重试次数仍未获取锁时抛出。
  */
-export function DistributedLock(options: DistributedLockOptions = {}) {
+export function DistributedLock(
+    options: DistributedLockOptions = {}
+): (target: object, propertyKey: string, descriptor: PropertyDescriptor) => PropertyDescriptor {
     return function (target: object, propertyKey: string, descriptor: PropertyDescriptor) {
         const isValidReturnType = Reflect.hasMetadata('design:returntype', target, propertyKey);
         if (!isValidReturnType) {
@@ -40,13 +63,16 @@ export function DistributedLock(options: DistributedLockOptions = {}) {
             const retryCount = options.retryCount ?? DEFAULT_RETRY_COUNT;
             const retryDelay = options.retryDelay ?? DEFAULT_RETRY_DELAY;
             const lockKey = resolveLockKey(target, propertyKey, options, args);
-            const token = await acquireLockWithRetry(provider, lockKey, ttl, retryCount, retryDelay);
+            const token = await acquireLockWithRetry({ provider, key: lockKey, ttl, retryCount, retryDelay });
 
             if (token === null) {
                 throw new LockAcquisitionError(lockKey, retryCount);
             }
 
-            const watchdog = renewInterval < ttl ? startWatchdog(provider, lockKey, token, ttl, renewInterval) : null;
+            const watchdog =
+                renewInterval < ttl
+                    ? startWatchdog({ provider, key: lockKey, token, ttl, interval: renewInterval })
+                    : null;
 
             try {
                 return await originalMethod.apply(this, args);
@@ -67,6 +93,7 @@ export function DistributedLock(options: DistributedLockOptions = {}) {
  * @param options 装饰器配置
  * @param args 方法参数
  * @returns 锁键字符串
+ * @throws 当业务提供的动态锁键函数抛出异常时透传。
  */
 function resolveLockKey(target: object, propertyKey: string, options: DistributedLockOptions, args: unknown[]): string {
     if (options.key === undefined || options.key === null) {
@@ -80,20 +107,17 @@ function resolveLockKey(target: object, propertyKey: string, options: Distribute
 
 /**
  * 带重试的锁获取
- * @param provider 锁提供者
- * @param key 锁键
- * @param ttl 过期时间
- * @param retryCount 最大重试次数
- * @param retryDelay 重试间隔
+ * @param request 锁提供者、锁键、有效期及重试策略。
  * @returns 成功返回 token，失败返回 null
+ * @throws 当锁提供者获取锁或重试等待失败时透传异常。
  */
-async function acquireLockWithRetry(
-    provider: LockProvider,
-    key: string,
-    ttl: number,
-    retryCount: number,
-    retryDelay: number
-): Promise<string | null> {
+async function acquireLockWithRetry({
+    provider,
+    key,
+    ttl,
+    retryCount,
+    retryDelay,
+}: LockAcquisitionRequest): Promise<string | null> {
     let attempts = 0;
     while (attempts <= retryCount) {
         const token = await provider.acquire(key, ttl);
@@ -108,9 +132,15 @@ async function acquireLockWithRetry(
     return null;
 }
 
-/** 启动看门狗续期 */
-function startWatchdog(provider: LockProvider, key: string, token: string, ttl: number, interval: number): Watchdog {
-    const watchdog = new Watchdog({ provider, key, token, ttl, interval });
+/**
+ * 创建并立即启动锁续期看门狗，保证业务执行期间锁不会因自然过期而失效。
+ *
+ * @param request 锁提供者、锁标识和续期时间配置。
+ * @returns 已启动的看门狗实例，供业务结束时停止。
+ * @throws 当看门狗构造或定时器启动失败时透传异常。
+ */
+function startWatchdog(request: WatchdogStartRequest): Watchdog {
+    const watchdog = new Watchdog(request);
     watchdog.start();
     return watchdog;
 }

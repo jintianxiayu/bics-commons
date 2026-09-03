@@ -7,6 +7,10 @@ describe('MemoryCacheProvider', () => {
         provider = new MemoryCacheProvider();
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     describe('get & set', () => {
         it('应返回已缓存的值', () => {
             provider.set('key1', 'value1');
@@ -27,12 +31,14 @@ describe('MemoryCacheProvider', () => {
 
             jest.advanceTimersByTime(5001);
             expect(provider.get('key1')).toBeUndefined();
-
-            jest.useRealTimers();
         });
 
         it('无 TTL 时不应失效', () => {
+            jest.useFakeTimers();
+
             provider.set('key1', 'value1');
+            jest.advanceTimersByTime(24 * 60 * 60 * 1000);
+
             expect(provider.get('key1')).toBe('value1');
         });
     });

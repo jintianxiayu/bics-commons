@@ -15,7 +15,9 @@ export class KeyBuilder {
         }
         const serializedArgs = args
             .map((arg) => {
-                if (arg === null || arg === undefined) return 'null';
+                if (arg === null || arg === undefined) {
+                    return 'null';
+                }
                 if (typeof arg === 'object') {
                     try {
                         return JSON.stringify(arg);

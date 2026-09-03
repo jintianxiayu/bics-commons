@@ -15,8 +15,7 @@ const builtinLogger = LoggerFactory.getLogger('@jintianxiayu/http-client-decorat
  */
 export function createDebugMiddleware(options: DebugOptions): Middleware {
     const logFn =
-        options.logger ??
-        ((message: string, meta?: Record<string, unknown>) => builtinLogger.debug(message, meta));
+        options.logger ?? ((message: string, meta?: Record<string, unknown>) => builtinLogger.debug(message, meta));
     const logBody = options.logBody ?? true;
     const logHeaders = options.logHeaders ?? true;
 
@@ -25,8 +24,12 @@ export function createDebugMiddleware(options: DebugOptions): Middleware {
         const { method, url, headers, body } = ctx.request;
 
         const requestMeta: Record<string, unknown> = { method, url };
-        if (logHeaders) requestMeta.headers = headers;
-        if (logBody && body !== undefined) requestMeta.body = body;
+        if (logHeaders) {
+            requestMeta.headers = headers;
+        }
+        if (logBody && body !== undefined) {
+            requestMeta.body = body;
+        }
         logFn('HTTP Request', requestMeta);
 
         try {
@@ -40,8 +43,12 @@ export function createDebugMiddleware(options: DebugOptions): Middleware {
         const duration = Date.now() - startTime;
         const { response } = ctx;
         const responseMeta: Record<string, unknown> = { method, url, status: response?.status, duration };
-        if (logHeaders) responseMeta.headers = response?.headers;
-        if (logBody) responseMeta.body = response?.data;
+        if (logHeaders) {
+            responseMeta.headers = response?.headers;
+        }
+        if (logBody) {
+            responseMeta.body = response?.data;
+        }
         logFn('HTTP Response', responseMeta);
     };
 }

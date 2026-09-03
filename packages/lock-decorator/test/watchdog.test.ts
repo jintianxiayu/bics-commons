@@ -34,10 +34,10 @@ describe('Watchdog', () => {
 
         expect(mockProvider.renew).not.toHaveBeenCalled();
 
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledWith('key', 'token', 30000);
 
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledTimes(2);
     });
 
@@ -54,12 +54,15 @@ describe('Watchdog', () => {
 
         watchdog.start();
 
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledTimes(1);
 
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledTimes(2);
         expect(mockProvider.renew).toHaveBeenCalledWith('key', 'token', 30000);
+
+        await jest.advanceTimersByTimeAsync(100);
+        expect(mockProvider.renew).toHaveBeenCalledTimes(2);
     });
 
     it('should stop renewal when explicitly stopped', async () => {
@@ -73,11 +76,11 @@ describe('Watchdog', () => {
         });
 
         watchdog.start();
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledTimes(1);
 
         watchdog.stop();
-        jest.advanceTimersByTime(100);
+        await jest.advanceTimersByTimeAsync(100);
         expect(mockProvider.renew).toHaveBeenCalledTimes(1);
     });
 });

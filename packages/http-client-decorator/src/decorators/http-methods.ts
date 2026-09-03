@@ -14,7 +14,7 @@ function createMethodDecorator(method: HttpMethod) {
         return function (
             target: object,
             propertyKey: string | symbol,
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
             _descriptor: PropertyDescriptor
         ): void {
             const metadata: MethodMetadata = { method, path };

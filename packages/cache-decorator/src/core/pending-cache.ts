@@ -11,9 +11,12 @@ export class PendingCache {
 
     set<T>(key: string, promise: Promise<T>): void {
         this.pending.set(key, promise);
-        promise.finally(() => {
-            this.pending.delete(key);
-        });
+        const deleteSettledPromise = (): void => {
+            if (this.pending.get(key) === promise) {
+                this.pending.delete(key);
+            }
+        };
+        void promise.then(deleteSettledPromise, deleteSettledPromise);
     }
 
     delete(key: string): void {

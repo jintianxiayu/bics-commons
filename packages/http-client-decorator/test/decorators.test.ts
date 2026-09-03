@@ -18,7 +18,6 @@ describe('装饰器元数据存储和读取', () => {
     describe('@HttpClient', () => {
         it('should store config in metadata', () => {
             @HttpClient({ baseURL: 'https://api.example.com' })
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             class TestService {}
 
             const config = (
@@ -30,7 +29,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store config with middlewares', () => {
             const mockMw = async () => {};
             @HttpClient({ baseURL: 'https://api.example.com', middlewares: [mockMw] })
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             class TestService {}
 
             const config = (
@@ -49,7 +47,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store GET method metadata', () => {
             class TestService {
                 @Get('/users/:id')
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 getUser() {}
             }
 
@@ -60,7 +57,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store POST method metadata', () => {
             class TestService {
                 @Post('/users')
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 createUser() {}
             }
 
@@ -71,7 +67,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store PUT method metadata', () => {
             class TestService {
                 @Put('/users/:id')
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 updateUser() {}
             }
 
@@ -82,7 +77,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store DELETE method metadata', () => {
             class TestService {
                 @Delete('/users/:id')
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 deleteUser() {}
             }
 
@@ -93,7 +87,6 @@ describe('装饰器元数据存储和读取', () => {
         it('should store PATCH method metadata', () => {
             class TestService {
                 @Patch('/users/:id')
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 patchUser() {}
             }
 
@@ -105,7 +98,6 @@ describe('装饰器元数据存储和读取', () => {
     describe('@Path/@Query/@Body/@Header', () => {
         it('should store Path param metadata', () => {
             class TestService {
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 getUser(@Path('id') _id: string) {}
             }
 
@@ -115,7 +107,6 @@ describe('装饰器元数据存储和读取', () => {
 
         it('should store Query param metadata', () => {
             class TestService {
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 search(@Query('keyword') _keyword: string) {}
             }
 
@@ -125,7 +116,6 @@ describe('装饰器元数据存储和读取', () => {
 
         it('should store Body param metadata', () => {
             class TestService {
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 create(@Body() _dto: unknown) {}
             }
 
@@ -135,7 +125,6 @@ describe('装饰器元数据存储和读取', () => {
 
         it('should store Header param metadata', () => {
             class TestService {
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 getWithAuth(@Header('Authorization') _token: string) {}
             }
 
@@ -145,7 +134,6 @@ describe('装饰器元数据存储和读取', () => {
 
         it('should store all param metadata when multiple params exist', () => {
             class TestService {
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 complex(
                     @Path('id') _id: string,
                     @Query('expand') _expand: string,

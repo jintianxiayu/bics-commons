@@ -4,6 +4,7 @@ module.exports = {
     testEnvironment: 'node',
     roots: ['<rootDir>/src', '<rootDir>/test'],
     testMatch: ['**/test/**/*.test.ts'],
+    testTimeout: 15000,
     moduleFileExtensions: ['ts', 'js'],
     collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
     transform: {

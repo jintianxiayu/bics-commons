@@ -31,18 +31,18 @@ export class LockProviderRegistry {
         if (name) {
             const provider = this.providers.get(name);
             if (!provider) {
-                throw new Error(`CacheProvider "${name}" not found`);
+                throw new Error(`LockProvider "${name}" not found`);
             }
             return provider;
         }
         if (this.defaultName) {
             const provider = this.providers.get(this.defaultName);
             if (!provider) {
-                throw new Error(`CacheProvider "${this.defaultName}" not found`);
+                throw new Error(`LockProvider "${this.defaultName}" not found`);
             }
             return provider;
         }
-        throw new Error('No CacheProvider registered and no default set');
+        throw new Error('No LockProvider registered and no default set');
     }
 
     /**
@@ -52,7 +52,7 @@ export class LockProviderRegistry {
      */
     static setDefault(name: string): void {
         if (!this.providers.has(name)) {
-            throw new Error(`CacheProvider "${name}" not found`);
+            throw new Error(`LockProvider "${name}" not found`);
         }
         this.defaultName = name;
     }

@@ -1,71 +1,59 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+/** 异步日志上下文中 K 为 traceId 等关联字段名，V 为业务调用链需要透传的任意只读值。 */
+type ContextValues = Readonly<Record<string, unknown>>;
+
+const storage = new AsyncLocalStorage<ContextValues>();
+
 /**
- * LoggerContext - 异步上下文存储
+ * 限制上下文为普通键值对象，避免数组或类实例在异步边界中携带隐式行为。
  *
- * 基于 AsyncLocalStorage 实现跨异步调用链的上下文传递
+ * @param value 待校验的上下文值。
+ * @returns 值是否可以作为日志上下文存储。
+ * @throws 不主动抛出异常。
  */
-
-import { AsyncLocalStorage } from 'async_hooks';
-
-const contextStore = new AsyncLocalStorage<Map<string, string>>();
-
-function getOrCreateStore(): Map<string, string> {
-    let store = contextStore.getStore();
-    if (!store) {
-        store = new Map();
-        contextStore.enterWith(store);
+function isContextValues(value: unknown): value is ContextValues {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
     }
-    return store;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
 }
 
+/** 为一次异步调用链保存日志上下文，使业务代码无需逐层传递 traceId 等关联字段。 */
 export class LoggerContext {
     /**
-     * 设置上下文值
-     */
-    static set(key: string, value: string): void {
-        const store = getOrCreateStore();
-        store.set(key, value);
-    }
-
-    /**
-     * 获取上下文值
-     */
-    static get(key: string): string | undefined {
-        const store = contextStore.getStore();
-        return store?.get(key);
-    }
-
-    /**
-     * 清空当前上下文
-     */
-    static clear(): void {
-        const store = contextStore.getStore();
-        if (store) {
-            store.clear();
-        }
-    }
-
-    /**
-     * 获取当前存储（供内部或高级用法使用）
-     */
-    static getStore(): Map<string, string> | undefined {
-        return contextStore.getStore();
-    }
-
-    /**
-     * 在给定上下文中执行函数，自动清理
+     * 在回调的异步调用链内合并并保存上下文，同时保持父级上下文可继承。
      *
-     * @param values - 要合并到上下文的键值对
-     * @param fn - 要执行的函数
-     * @returns 函数的返回值
+     * @param values 本次调用链需要补充或覆盖的上下文字段。
+     * @param callback 在该上下文中执行的业务回调。
+     * @returns 业务回调的原始返回值。
+     * @throws {TypeError} 当上下文不是普通对象或回调不是函数时抛出。
      */
-    static withContext<T>(values: Record<string, string>, fn: () => T): T {
-        const currentStore = contextStore.getStore();
-        const newStore = new Map(currentStore);
-
-        for (const [k, v] of Object.entries(values)) {
-            newStore.set(k, v);
+    static withContext<T>(values: ContextValues, callback: () => T): T {
+        if (!isContextValues(values)) {
+            throw new TypeError('Logger context values must be a plain object');
+        }
+        if (typeof callback !== 'function') {
+            throw new TypeError('Logger context callback must be a function');
         }
 
-        return contextStore.run(newStore, fn);
+        const parent = storage.getStore() ?? {};
+        const store = Object.freeze({ ...parent, ...values });
+        return storage.run(store, callback);
+    }
+
+    /**
+     * 读取当前异步调用链中的上下文字段，使日志写入可以自动关联 traceId。
+     *
+     * @param key 需要读取的上下文字段名。
+     * @returns 当前字段值；键无效或当前没有对应上下文时返回 undefined。
+     * @throws 不主动抛出异常。
+     */
+    static get<T = unknown>(key: string): T | undefined {
+        if (typeof key !== 'string' || key.length === 0) {
+            return undefined;
+        }
+        return storage.getStore()?.[key] as T | undefined;
     }
 }

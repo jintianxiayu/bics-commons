@@ -13,6 +13,10 @@ describe('@Cache 装饰器', () => {
         provider.clear();
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     describe('基础缓存', () => {
         it('应缓存方法结果', async () => {
             class UserService {
@@ -58,8 +62,11 @@ describe('@Cache 装饰器', () => {
             jest.useFakeTimers();
 
             class UserService {
+                callCount = 0;
+
                 @Cache('user-cache', { ttl: 60 })
                 async getUser(id: number) {
+                    this.callCount++;
                     return { id };
                 }
             }
@@ -72,8 +79,7 @@ describe('@Cache 装饰器', () => {
 
             const result2 = await service.getUser(1);
             expect(result2).toEqual({ id: 1 });
-
-            jest.useRealTimers();
+            expect(service.callCount).toBe(2);
         });
     });
 
@@ -101,45 +107,40 @@ describe('@Cache 装饰器', () => {
     });
 
     describe('错误结果缓存', () => {
-        it.skip('应缓存错误结果', async () => {
+        it('应缓存错误结果并重新抛出原始异常', async () => {
+            const expectedError = new Error('user not found');
+
             class UserService {
                 callCount = 0;
 
                 @Cache('user-cache')
                 async getUser(_id: number) {
                     this.callCount++;
-                    throw new Error('user not found');
+                    throw expectedError;
                 }
             }
 
             const service = new UserService();
 
-            try {
-                await service.getUser(1);
-            } catch (e) {
-                // expected
-            }
-            try {
-                await service.getUser(1);
-            } catch (e) {
-                // expected
-            }
+            await expect(service.getUser(1)).rejects.toBe(expectedError);
+            await expect(service.getUser(1)).rejects.toBe(expectedError);
             expect(service.callCount).toBe(1);
         });
     });
 
     describe('请求合并', () => {
-        it.skip('并发请求应返回同一 Promise', async () => {
+        it('并发请求应返回同一 Promise', async () => {
             let resolvePromise: ((value: number) => void) | undefined;
             let callCount = 0;
+            const resultPromise = new Promise<number>((resolve) => {
+                resolvePromise = resolve;
+            });
 
             class UserService {
                 @Cache('user-cache')
                 async getUser(_id: number): Promise<number> {
                     callCount++;
-                    return new Promise((resolve) => {
-                        resolvePromise = resolve;
-                    });
+                    return resultPromise;
                 }
             }
 
@@ -147,14 +148,12 @@ describe('@Cache 装饰器', () => {
             const promise1 = service.getUser(1);
             const promise2 = service.getUser(1);
 
-            await new Promise((resolve) => setTimeout(resolve, 10));
-
-            expect(callCount).toBe(1);
-            expect(promise1).toBe(promise2);
-
+            await Promise.resolve();
             resolvePromise!(42);
 
             const [result1, result2] = await Promise.all([promise1, promise2]);
+            expect(callCount).toBe(1);
+            expect(promise1).toBe(promise2);
             expect(result1).toBe(42);
             expect(result2).toBe(42);
             expect(callCount).toBe(1);

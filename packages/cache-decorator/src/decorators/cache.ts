@@ -82,23 +82,15 @@ function resolveCacheKey(cacheName: string, keyResolver: CacheKeyResolver | unde
  * @param cacheName 缓存名称
  * @param options 配置项
  */
-export function Cache(cacheName: string, options?: CacheOptions) {
+export function Cache(
+    cacheName: string,
+    options?: CacheOptions
+): (_target: object, _propertyKey: string, descriptor: PropertyDescriptor) => void {
     return function <T>(_target: object, _propertyKey: string, descriptor: PropertyDescriptor) {
         const originalMethod = descriptor.value;
 
-        descriptor.value = async function (...args: unknown[]) {
+        descriptor.value = function (...args: unknown[]): Promise<T> {
             const cacheKey = resolveCacheKey(cacheName, options?.key, args);
-            const providerName = options?.providerName;
-            const provider = CacheProviderRegistry.get(providerName);
-
-            const cached = await provider.get(cacheKey);
-            if (cached !== undefined) {
-                const entry = cached as CacheEntry<T>;
-                if ('error' in entry) {
-                    throw entry.error;
-                }
-                return entry.value;
-            }
 
             const pending = pendingCache.get<T>(cacheKey);
             if (pending) {
@@ -106,8 +98,18 @@ export function Cache(cacheName: string, options?: CacheOptions) {
             }
 
             const promise = (async () => {
+                const provider = CacheProviderRegistry.get(options?.providerName);
+                const cached = await provider.get(cacheKey);
+                if (cached !== undefined) {
+                    const entry = cached as CacheEntry<T>;
+                    if ('error' in entry) {
+                        throw entry.error;
+                    }
+                    return entry.value;
+                }
+
                 try {
-                    const result = await originalMethod.apply(this, args);
+                    const result = (await originalMethod.apply(this, args)) as T;
                     provider.set(cacheKey, { value: result } as CacheEntry<T>, options?.ttl);
                     return result;
                 } catch (error) {

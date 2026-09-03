@@ -17,7 +17,9 @@ export class MemoryCacheProvider implements CacheProvider {
 
     get<T>(key: string): T | undefined {
         const entry = this.cache.get(key);
-        if (!entry) return undefined;
+        if (!entry) {
+            return undefined;
+        }
         if (entry.expiresAt !== null && Date.now() > entry.expiresAt) {
             this.cache.delete(key);
             return undefined;

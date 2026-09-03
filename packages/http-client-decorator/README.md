@@ -105,17 +105,14 @@ class UserService {}
 
 ### tracing — 自动注入 traceId
 
-自动从 [`LoggerContext`](../logger/README.md#tracecontext---traceid-追踪) 读取 `traceId`，并注入到每次请求的指定 header 中。
+自动从 [`LoggerContext`](../logger/README.md#日志与上下文) 读取 `traceId`，并注入到每次请求的指定 header 中。
 
 ```typescript
 import { LoggerContext } from '@jintianxiayu/logger';
 
-// 在请求链路入口设置 traceId（如 Koa/Express 中间件）
-LoggerContext.set('traceId', 'req-abc-123');
-
 @HttpClient({
     baseURL: 'https://api.example.com',
-    tracing: true,  // 默认注入到 x-trace-id header
+    tracing: true, // 默认注入到 x-trace-id header
 })
 class UserService {
     @Get('/users/:id')
@@ -123,6 +120,11 @@ class UserService {
         return Promise.resolve({} as User);
     }
 }
+
+// 在请求链路入口包裹完整异步调用链（如 Koa/Express 中间件）
+await LoggerContext.withContext({ traceId: 'req-abc-123' }, async () => {
+    await new UserService().getUser('42');
+});
 // 每次请求自动携带 x-trace-id: req-abc-123
 ```
 
@@ -132,8 +134,8 @@ class UserService {
 @HttpClient({
     baseURL: 'https://api.example.com',
     tracing: {
-        headerName: 'x-request-id',              // 自定义 header 名称
-        provider: () => myStore.getTraceId(),     // 自定义 traceId 来源
+        headerName: 'x-request-id', // 自定义 header 名称
+        provider: () => myStore.getTraceId(), // 自定义 traceId 来源
     },
 })
 class UserService {}
@@ -150,7 +152,7 @@ class UserService {}
 ```typescript
 @HttpClient({
     baseURL: 'https://api.example.com',
-    debug: true,  // 使用包内 Logger 输出
+    debug: true, // 使用包内 Logger 输出
 })
 class UserService {}
 ```
@@ -168,9 +170,9 @@ DEBUG [@jintianxiayu/http-client-decorator] HTTP Response {"method":"GET","url":
 @HttpClient({
     baseURL: 'https://api.example.com',
     debug: {
-        logBody: false,     // 不输出 body（适合含敏感信息的接口）
-        logHeaders: false,  // 不输出 headers
-        logger: (msg, meta) => console.log(msg, meta),  // 自定义输出函数
+        logBody: false, // 不输出 body（适合含敏感信息的接口）
+        logHeaders: false, // 不输出 headers
+        logger: (msg, meta) => console.log(msg, meta), // 自定义输出函数
     },
 })
 class UserService {}
@@ -183,10 +185,7 @@ class UserService {}
 ```typescript
 import { createTracingMiddleware, createDebugMiddleware } from '@jintianxiayu/http-client-decorator';
 
-const middlewares = [
-    createTracingMiddleware({ headerName: 'x-trace-id' }),
-    createDebugMiddleware({ logBody: false }),
-];
+const middlewares = [createTracingMiddleware({ headerName: 'x-trace-id' }), createDebugMiddleware({ logBody: false })];
 ```
 
 ---
@@ -244,14 +243,14 @@ interface HttpClientConfig {
 }
 
 interface TracingOptions {
-    headerName?: string;                    // 默认 'x-trace-id'
-    provider?: () => string | undefined;    // 默认从 LoggerContext.get('traceId') 读取
+    headerName?: string; // 默认 'x-trace-id'
+    provider?: () => string | undefined; // 默认从 LoggerContext.get('traceId') 读取
 }
 
 interface DebugOptions {
     logger?: (message: string, meta?: Record<string, unknown>) => void;
-    logBody?: boolean;     // 默认 true
-    logHeaders?: boolean;  // 默认 true
+    logBody?: boolean; // 默认 true
+    logHeaders?: boolean; // 默认 true
 }
 
 interface HttpContext {
