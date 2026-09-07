@@ -1,6 +1,6 @@
-import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { LockProvider } from './lock-provider';
+import { RedisLockClient } from './redis-lock-client';
 
 /** 释放锁的 Lua 脚本：校验 token 后删除 */
 const RELEASE_SCRIPT = `
@@ -25,24 +25,28 @@ end
  * 使用 SET NX PX 原子设锁，Lua 脚本保证原子操作
  */
 export class RedisLockProvider implements LockProvider {
-    constructor(private client: Redis) {}
+    /**
+     * 复用调用方适配后的 Redis 操作，连接生命周期仍归调用方。
+     * @param client 客户端无关的原子操作边界。
+     */
+    constructor(private readonly client: RedisLockClient) {}
 
     /** @inheritdoc */
     async acquire(key: string, ttl: number): Promise<string | null> {
         const token = uuidv4();
-        const result = await this.client.set(key, token, 'PX', ttl, 'NX');
-        return result === 'OK' ? token : null;
+        const acquired = await this.client.setIfAbsent({ key, value: token, ttlMs: ttl });
+        return acquired ? token : null;
     }
 
     /** @inheritdoc */
     async release(key: string, token: string): Promise<boolean> {
-        const result = await this.client.eval(RELEASE_SCRIPT, 1, key, token);
+        const result = await this.client.eval({ script: RELEASE_SCRIPT, keys: [key], arguments: [token] });
         return result === 1;
     }
 
     /** @inheritdoc */
     async renew(key: string, token: string, ttl: number): Promise<boolean> {
-        const result = await this.client.eval(RENEW_SCRIPT, 1, key, token, ttl);
+        const result = await this.client.eval({ script: RENEW_SCRIPT, keys: [key], arguments: [token, String(ttl)] });
         return result === 1;
     }
 }

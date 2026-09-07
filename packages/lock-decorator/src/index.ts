@@ -1,6 +1,9 @@
 export { DistributedLock } from './decorators/distributed-lock';
 export { LockProviderRegistry } from './core/lock-provider-registry';
 export { RedisLockProvider } from './core/redis-lock-provider';
+export { createIoredisLockClient } from './adapters/ioredis-lock-client';
+export { createNodeRedisLockClient } from './adapters/node-redis-lock-client';
+export type { RedisLockClient, IoredisLockClientSource, NodeRedisLockClientSource } from './core/redis-lock-client';
 export { LockAcquisitionError } from './errors/lock-acquisition-error';
 export type { LockProvider, DistributedLockOptions } from './core/lock-provider';
 export { DEFAULT_TTL, DEFAULT_RENEW_INTERVAL, DEFAULT_RETRY_COUNT, DEFAULT_RETRY_DELAY } from './core/lock-provider';

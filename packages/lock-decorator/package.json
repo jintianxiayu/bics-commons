@@ -11,11 +11,14 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "ioredis": "^5.10.1",
         "reflect-metadata": "^0.2.2",
         "uuid": "^11.0.0"
     },
     "publishConfig": {
         "access": "public"
+    },
+    "devDependencies": {
+        "ioredis": "^5.10.1",
+        "redis": "^5.12.1"
     }
 }
