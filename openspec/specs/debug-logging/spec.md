@@ -1,3 +1,11 @@
+# debug-logging Specification
+
+## Purpose
+
+定义声明式 HTTP 客户端在调试模式下记录请求、响应、错误和耗时的可观察行为，并约束 body、headers、自定义 logger 与未启用时的副作用边界。
+
+## Requirements
+
 ### Requirement: 默认 debug 输出
 
 当 `debug` 配置为 `true` 或 `{}` 时，系统 SHALL 使用包内 Logger 的 `debug()` 方法输出完整的请求和响应详情。

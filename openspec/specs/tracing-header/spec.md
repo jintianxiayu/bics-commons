@@ -1,3 +1,11 @@
+# tracing-header Specification
+
+## Purpose
+
+定义声明式 HTTP 客户端从日志上下文或自定义 provider 获取 traceId 并注入请求头的行为，同时约束 header 定制、缺省无副作用及 middleware 执行顺序。
+
+## Requirements
+
 ### Requirement: 默认 traceId 注入
 
 当 `tracing` 配置为 `true` 或 `{}` 时，系统 SHALL 从 `LoggerContext.get('traceId')` 获取 traceId，并注入到请求头 `x-trace-id` 中。

@@ -62,7 +62,7 @@ describe('MemoryCacheProvider', () => {
     });
 
     describe('deleteByPattern', () => {
-        it('应删除匹配模式的键', () => {
+        it('cache-evict-allentries-prefix/MemoryCacheProvider 实现前缀匹配', () => {
             provider.set('user:1', 'user1');
             provider.set('user:2', 'user2');
             provider.set('order:1', 'order1');
