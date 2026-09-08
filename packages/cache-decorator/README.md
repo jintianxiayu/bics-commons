@@ -2,12 +2,20 @@
 
 为 TypeScript 异步方法提供声明式缓存、缓存清除、请求合并，以及 Memory、Redis 和自定义缓存后端。
 
+## 目录
+
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [缓存日志](#缓存日志)
+- [Redis](#redis)
+- [API](#api)
+
 ## 安装
 
-基础包不绑定任何 Redis SDK：
+Logger 是必需的 peer dependency；基础包不绑定任何 Redis SDK：
 
 ```bash
-pnpm add @jintianxiayu/cache-decorator reflect-metadata
+pnpm add @jintianxiayu/cache-decorator @jintianxiayu/logger reflect-metadata
 ```
 
 需要 Redis 时，只安装应用实际使用的客户端：
@@ -23,6 +31,21 @@ pnpm add ioredis
 ```typescript
 import 'reflect-metadata';
 import { Cache, CacheEvict, CacheProviderRegistry, MemoryCacheProvider } from '@jintianxiayu/cache-decorator';
+import { LoggerFactory } from '@jintianxiayu/logger';
+
+LoggerFactory.init({
+    root: {
+        level: 'info',
+        console: { enabled: true },
+        file: { enabled: false },
+    },
+    loggers: {
+        '@jintianxiayu/cache-decorator': {
+            level: 'debug',
+            console: { enabled: true, format: 'json' },
+        },
+    },
+});
 
 CacheProviderRegistry.register('memory', new MemoryCacheProvider());
 CacheProviderRegistry.setDefault('memory');
@@ -66,6 +89,38 @@ class UserService {
     }
 }
 ```
+
+## 缓存日志
+
+缓存装饰器使用名称固定为 `@jintianxiayu/cache-decorator` 的 Logger。应用必须安装兼容版本的
+`@jintianxiayu/logger`，并在第一次调用被装饰方法前完成 `LoggerFactory.init()`；应用退出时仍由应用统一调用
+`LoggerFactory.shutdown()`。仅导入包、声明 decorator 或定义 class 不会提前获取 Logger，cache 包也不会自行初始化或关闭
+Logger。
+
+日志的 level、console/file transport、格式和脱敏只由同名 Logger profile 控制，不需要也不支持
+`CacheOptions.logging`、`debug` 或 Logger 回调。高频正常决策默认使用 `debug`，可恢复回退使用 `warn`，缓存基础设施失败使用
+`error`；逐调用事件不使用 `info`。
+
+| level   | event                    | 含义                                                   |
+| ------- | ------------------------ | ------------------------------------------------------ |
+| `debug` | `cache.pending_hit`      | 复用相同 key 的执行中 Promise                          |
+| `debug` | `cache.hit`              | 命中 value 或 error 缓存条目                           |
+| `debug` | `cache.miss`             | Provider 正常返回未命中                                |
+| `debug` | `cache.write_dispatched` | `set()` 已同步返回控制权，不表示异步写入成功           |
+| `debug` | `cache.evict_dispatched` | 单 key `delete()` 已同步返回控制权，不表示异步删除成功 |
+| `debug` | `cache.evict_completed`  | 已等待的 `deleteByPattern()` 正常完成                  |
+| `warn`  | `cache.key_fallback`     | 自定义 key resolver 失败，已回退默认 key               |
+| `warn`  | `cache.evict_skipped`    | 业务方法失败，淘汰被跳过                               |
+| `error` | `cache.operation_failed` | Provider 解析或可观察的读取、写入、淘汰操作失败        |
+
+`write_dispatched` 和 `evict_dispatched` 只描述调用已发起。为保持既有时序，decorator 不等待 `set()` 或单 key
+`delete()` 返回的 Promise，也不为日志附加 rejection handler；异步失败不会被描述为成功或完成。只有本来就会等待的全量淘汰可记录
+`evict_completed`。
+
+每条日志只包含 `event`、`cacheName`、`methodName`、`providerName`，并按事件增加 `entryType`、`scope`、
+`reason`、`operation` 或基础设施 `error`。日志不会包含方法参数、业务返回值、缓存值、业务异常内容或完整逻辑/物理 cache
+key，也不会为日志额外序列化这些值。Provider 错误和现有 `LoggerContext` 的 `traceId` 继续由 Logger 统一规范化、脱敏和关联；
+cache 包不直接读写 LoggerContext。Logger 自身同步失败会被隔离，不会替换缓存结果、业务结果或原始 Provider 错误。
 
 ## Redis
 

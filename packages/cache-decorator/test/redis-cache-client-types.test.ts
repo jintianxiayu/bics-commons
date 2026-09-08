@@ -144,3 +144,41 @@ it('redis-cache-client/C04 不完整或错误配对的类型被拒绝', () => {
     `)
     ).toEqual([]);
 });
+
+it('cache-operation-logging/A01 既有 decorator 与 Provider 公共类型不需要日志选项', () => {
+    expect(
+        checkTypes(`
+        import {
+            Cache,
+            CacheEvict,
+            type CacheEvictOptions,
+            type CacheOptions,
+            type CacheProvider,
+        } from '../src';
+
+        const provider: CacheProvider = {
+            get: <Value>(_key: string): Value | undefined => undefined,
+            set: <Value>(_key: string, _value: Value, _ttl?: number): void => undefined,
+            delete: (_key: string): void => undefined,
+            clear: (): void => undefined,
+            deleteByPattern: (_pattern: string): void => undefined,
+        };
+        const cache = Cache('contract-cache', { ttl: 60, providerName: 'memory', key: null });
+        const evict = CacheEvict('contract-cache', { providerName: 'memory', allEntries: true });
+        const invalidCacheOptions: CacheOptions = {
+            // @ts-expect-error CacheOptions 不接受第二套日志配置。
+            logging: true,
+        };
+        const invalidEvictOptions: CacheEvictOptions = {
+            // @ts-expect-error CacheEvictOptions 不接受 Logger 实例。
+            logger: undefined,
+        };
+
+        void provider;
+        void cache;
+        void evict;
+        void invalidCacheOptions;
+        void invalidEvictOptions;
+    `)
+    ).toEqual([]);
+});

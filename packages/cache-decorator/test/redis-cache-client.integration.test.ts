@@ -194,7 +194,7 @@ redisTests('Redis 客户端数据与互操作协议', () => {
         expect(await fixture.io.ttl(key)).toBeGreaterThan(20);
     });
 
-    it('redis-cache-client/I03 新版本读取旧版本缓存', async () => {
+    it('cache-operation-logging/A03 redis-cache-client/I03 新版本读取旧版本缓存', async () => {
         if (!fixture) {
             throw new Error('Redis fixture is required');
         }

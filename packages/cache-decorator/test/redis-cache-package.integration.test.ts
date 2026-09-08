@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
@@ -6,6 +6,7 @@ import {
     installConsumer,
     PackageConsumer,
     packCurrentPackage,
+    packLoggerPackage,
     readReadmeExample,
     removePackageTestRoot,
     runCommand,
@@ -16,8 +17,9 @@ jest.setTimeout(180000);
 const sources = {
     none: `
         import assert from 'node:assert/strict';
+        import { LoggerFactory } from '@jintianxiayu/logger';
         import {
-            CacheProviderRegistry, MemoryCacheProvider, RedisCacheProvider, createIoredisCacheClient,
+            Cache, CacheProviderRegistry, MemoryCacheProvider, RedisCacheProvider, createIoredisCacheClient,
             createNodeRedisCacheClient, type CacheProvider, type RedisCacheClient,
             type IoredisCacheClientSource, type NodeRedisCacheClientSource, type NodeRedisCacheClientOptions,
         } from '@jintianxiayu/cache-decorator';
@@ -36,17 +38,40 @@ const sources = {
         export type Sources = IoredisCacheClientSource | NodeRedisCacheClientSource;
         export type Options = NodeRedisCacheClientOptions;
         async function main(): Promise<void> {
-            assert.equal(typeof createIoredisCacheClient, 'function');
-            assert.equal(typeof createNodeRedisCacheClient, 'function');
-            const memory = new MemoryCacheProvider();
-            await memory.set('memory-key', { source: 'memory' });
-            assert.deepEqual(await memory.get('memory-key'), { source: 'memory' });
-            const redis = new RedisCacheProvider(client);
-            await redis.set('redis-key', { source: 'custom-client' });
-            assert.deepEqual(await redis.get('redis-key'), { source: 'custom-client' });
-            CacheProviderRegistry.register('custom', custom);
-            CacheProviderRegistry.setDefault('custom');
-            assert.equal(await CacheProviderRegistry.get().get('key'), undefined);
+            LoggerFactory.init({
+                root: { console: { enabled: false }, file: { enabled: false } },
+                processErrors: { uncaughtException: false, unhandledRejection: false, exitOnError: false },
+            });
+            try {
+                assert.equal(typeof createIoredisCacheClient, 'function');
+                assert.equal(typeof createNodeRedisCacheClient, 'function');
+                const memory = new MemoryCacheProvider();
+                await memory.set('memory-key', { source: 'memory' });
+                assert.deepEqual(await memory.get('memory-key'), { source: 'memory' });
+                CacheProviderRegistry.register('memory', memory);
+                let calls = 0;
+                class Service {
+                    @Cache('external-memory', { providerName: 'memory' })
+                    getValue(id: number): { id: number } {
+                        calls += 1;
+                        return { id };
+                    }
+                }
+                const service = new Service();
+                assert.deepEqual(await service.getValue(1), { id: 1 });
+                assert.deepEqual(await service.getValue(1), { id: 1 });
+                assert.equal(calls, 1);
+
+                const redis = new RedisCacheProvider(client);
+                await redis.set('redis-key', { source: 'custom-client' });
+                assert.deepEqual(await redis.get('redis-key'), { source: 'custom-client' });
+                CacheProviderRegistry.register('custom', custom);
+                CacheProviderRegistry.setDefault('custom');
+                assert.equal(await CacheProviderRegistry.get().get('key'), undefined);
+            } finally {
+                CacheProviderRegistry.clear();
+                await LoggerFactory.shutdown({ timeout: 2_000 });
+            }
         }
         main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });
     `,
@@ -157,29 +182,58 @@ function clientResolution(consumer: PackageConsumer): Record<string, string | nu
 beforeAll(() => {
     root = createPackageTestRoot();
     const archive = packCurrentPackage(root);
+    const loggerArchive = packLoggerPackage(root);
     consumers = {
         none: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'none',
             source: sources.none,
             readmeSource: readReadmeExample('自定义 RedisCacheClient'),
+            quickStartSource: readReadmeExample('快速开始', 2),
         }),
         redis: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'redis',
             source: sources.redis,
             readmeSource: readReadmeExample('node-redis'),
+            quickStartSource: readReadmeExample('快速开始', 2),
         }),
         ioredis: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'ioredis',
             source: sources.ioredis,
             readmeSource: readReadmeExample('ioredis'),
+            quickStartSource: readReadmeExample('快速开始', 2),
         }),
     };
+});
+
+it('cache-operation-logging/P01 外部严格消费项目显式提供并共享唯一 Logger peer', () => {
+    for (const consumer of Object.values(consumers)) {
+        const requireFromConsumer = createRequire(join(consumer.directory, 'package.json'));
+        const requireFromCache = createRequire(join(consumer.installedPackage, 'package.json'));
+        expect(realpathSync(requireFromCache.resolve('@jintianxiayu/logger'))).toBe(
+            realpathSync(requireFromConsumer.resolve('@jintianxiayu/logger'))
+        );
+        expect(consumer.dependencyTree).toContain('"@jintianxiayu/logger"');
+        expect(consumer.dependencyTree).toContain('"reflect-metadata"');
+    }
+});
+
+it('cache-operation-logging/P02 发布 manifest 将 Logger workspace peer 转为实际 semver', () => {
+    const manifest = JSON.parse(readFileSync(join(consumers.none.installedPackage, 'package.json'), 'utf8')) as {
+        readonly dependencies?: Record<string, string>;
+        readonly peerDependencies?: Record<string, string>;
+    };
+    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).toBe('^0.2.0');
+    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).not.toContain('workspace:');
+    expect(manifest.dependencies?.['@jintianxiayu/logger']).toBeUndefined();
 });
 
 afterAll(() => {

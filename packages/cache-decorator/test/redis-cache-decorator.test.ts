@@ -9,6 +9,11 @@ import { Cache } from '../src/decorators/cache';
 
 class FakeIoredisCacheClientSource implements IoredisCacheClientSource {
     readonly options = Object.freeze({ keyPrefix: '' });
+    readonly writes: Array<{
+        readonly key: string;
+        readonly value: string;
+        readonly ttlSeconds: number | undefined;
+    }> = [];
     private readonly values = new Map<string, string>();
 
     constructor(private readonly events: string[]) {}
@@ -20,12 +25,14 @@ class FakeIoredisCacheClientSource implements IoredisCacheClientSource {
 
     set(key: string, value: string): Promise<unknown> {
         this.events.push(`set:${key}`);
+        this.writes.push({ key, value, ttlSeconds: undefined });
         this.values.set(key, value);
         return Promise.resolve('OK');
     }
 
-    setex(key: string, _ttlSeconds: number, value: string): Promise<unknown> {
+    setex(key: string, ttlSeconds: number, value: string): Promise<unknown> {
         this.events.push(`setex:${key}`);
+        this.writes.push({ key, value, ttlSeconds });
         this.values.set(key, value);
         return Promise.resolve('OK');
     }
@@ -48,6 +55,14 @@ class FakeIoredisCacheClientSource implements IoredisCacheClientSource {
     flushdb(): Promise<unknown> {
         this.values.clear();
         return Promise.resolve('OK');
+    }
+
+    seed(key: string, value: string): void {
+        this.values.set(key, value);
+    }
+
+    raw(key: string): string | undefined {
+        return this.values.get(key);
     }
 }
 
@@ -139,4 +154,48 @@ it('redis-cache-client/D02 指定 Provider 名称保持原行为', async () => {
     expect(service.memoryCalls).toBe(1);
     expect(events.filter((event) => event === `get:${redisKey}`)).toHaveLength(3);
     expect(events).toContain(`del:${redisKey}`);
+});
+
+it('cache-operation-logging/A03 日志改造保持旧版 Redis key、entry、TTL 与淘汰 pattern', async () => {
+    const events: string[] = [];
+    const source = new FakeIoredisCacheClientSource(events);
+    const scan = jest.spyOn(source, 'scan');
+    const provider = new RedisCacheProvider(createIoredisCacheClient(source));
+    CacheProviderRegistry.register('compat-redis', provider);
+    const legacyKey = KeyBuilder.build('compat-users', ['legacy']);
+    const freshKey = KeyBuilder.build('compat-users', ['fresh']);
+    source.seed(legacyKey, '{"value":{"id":18,"source":"legacy-0.1.3"}}');
+    let legacyBusinessCalls = 0;
+
+    class UserService {
+        @Cache('compat-users', { providerName: 'compat-redis', key: 'legacy' })
+        async getLegacyUser(): Promise<{ id: number; source: string }> {
+            legacyBusinessCalls += 1;
+            return { id: 0, source: 'business' };
+        }
+
+        @Cache('compat-users', { providerName: 'compat-redis', key: 'fresh', ttl: 45 })
+        async getFreshUser(): Promise<{ id: number; source: string }> {
+            return { id: 19, source: 'current' };
+        }
+
+        @CacheEvict('compat-users', { providerName: 'compat-redis', allEntries: true })
+        async clearUsers(): Promise<boolean> {
+            return true;
+        }
+    }
+
+    const service = new UserService();
+    await expect(service.getLegacyUser()).resolves.toEqual({ id: 18, source: 'legacy-0.1.3' });
+    expect(legacyBusinessCalls).toBe(0);
+    await expect(service.getFreshUser()).resolves.toEqual({ id: 19, source: 'current' });
+    expect(source.raw(freshKey)).toBe('{"value":{"id":19,"source":"current"}}');
+    expect(source.writes).toContainEqual({
+        key: freshKey,
+        value: '{"value":{"id":19,"source":"current"}}',
+        ttlSeconds: 45,
+    });
+
+    await expect(service.clearUsers()).resolves.toBe(true);
+    expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'compat-users*', 'COUNT', 100);
 });
