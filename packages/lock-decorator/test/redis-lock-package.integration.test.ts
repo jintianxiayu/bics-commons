@@ -1,11 +1,13 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
     createPackageTestRoot,
+    installWithoutLogger,
     installConsumer,
     PackageConsumer,
     packCurrentPackage,
+    packLoggerPackage,
     readReadmeExample,
     removePackageTestRoot,
     runCommand,
@@ -16,8 +18,10 @@ jest.setTimeout(180000);
 const sources = {
     none: `
         import assert from 'node:assert/strict';
-        import { RedisLockProvider, LockProviderRegistry, DistributedLock, createIoredisLockClient, createNodeRedisLockClient,
-            type RedisLockClient, type LockProvider, type IoredisLockClientSource, type NodeRedisLockClientSource } from '@jintianxiayu/lock-decorator';
+        import { RedisLockProvider, LockProviderRegistry, DistributedLock, Watchdog, DEFAULT_TTL,
+            DEFAULT_RENEW_INTERVAL, DEFAULT_RETRY_COUNT, DEFAULT_RETRY_DELAY, createIoredisLockClient,
+            createNodeRedisLockClient, type RedisLockClient, type LockProvider, type DistributedLockOptions,
+            type IoredisLockClientSource, type NodeRedisLockClientSource } from '@jintianxiayu/lock-decorator';
         const client: RedisLockClient = { setIfAbsent: async () => true, eval: async () => 1 };
         const custom: LockProvider = { acquire: async () => 'custom-token', release: async () => true, renew: async () => true };
         export type Sources = IoredisLockClientSource | NodeRedisLockClientSource;
@@ -25,6 +29,12 @@ const sources = {
             assert.equal(typeof createIoredisLockClient, 'function');
             assert.equal(typeof createNodeRedisLockClient, 'function');
             assert.equal(typeof DistributedLock, 'function');
+            assert.equal(DEFAULT_TTL, 30000);
+            assert.equal(DEFAULT_RENEW_INTERVAL, 10000);
+            assert.equal(DEFAULT_RETRY_COUNT, 0);
+            assert.equal(DEFAULT_RETRY_DELAY, 100);
+            const options: DistributedLockOptions = { key: null, ttl: DEFAULT_TTL, retryCount: 0 };
+            assert.equal(options.key, null);
             const provider = new RedisLockProvider(client);
             const token = await provider.acquire('custom-key', 1000);
             assert.ok(token);
@@ -33,6 +43,10 @@ const sources = {
             LockProviderRegistry.register('custom', custom);
             LockProviderRegistry.setDefault('custom');
             assert.equal(await LockProviderRegistry.get().acquire('key', 1000), 'custom-token');
+            const watchdog = new Watchdog({ provider: custom, key: 'key', token: 'token', ttl: 1000, interval: 500 });
+            watchdog.start();
+            watchdog.stop();
+            LockProviderRegistry.clear();
         }
         main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });
     `,
@@ -110,6 +124,7 @@ const sources = {
 
 let root: string;
 let consumers: Record<'none' | 'redis' | 'ioredis', PackageConsumer>;
+let missingPeerOutput: string;
 
 /** 在干净 Node 子进程内检查依赖解析，避免 Jest 启动脚本的 NODE_PATH 干扰。 */
 function clientResolution(consumer: PackageConsumer): Record<string, string | null> {
@@ -138,29 +153,64 @@ function clientResolution(consumer: PackageConsumer): Record<string, string | nu
 beforeAll(() => {
     root = createPackageTestRoot();
     const archive = packCurrentPackage(root);
+    const loggerArchive = packLoggerPackage(root);
+    const loggerSource = readReadmeExample('Logger 初始化');
+    missingPeerOutput = installWithoutLogger(root, archive);
     consumers = {
         none: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'none',
             source: sources.none,
             readmeSource: readReadmeExample('自定义 Redis 客户端'),
+            loggerSource,
         }),
         redis: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'redis',
             source: sources.redis,
             readmeSource: readReadmeExample('node-redis'),
+            loggerSource,
         }),
         ioredis: installConsumer({
             root,
             archive,
+            loggerArchive,
             client: 'ioredis',
             source: sources.ioredis,
             readmeSource: readReadmeExample('ioredis'),
+            loggerSource,
         }),
     };
+});
+
+it('lock-operation-logging/外部消费项目安装两个包', () => {
+    for (const consumer of Object.values(consumers)) {
+        const requireFromConsumer = createRequire(join(consumer.directory, 'package.json'));
+        const requireFromLock = createRequire(join(consumer.installedPackage, 'package.json'));
+        expect(realpathSync(requireFromLock.resolve('@jintianxiayu/logger'))).toBe(
+            realpathSync(requireFromConsumer.resolve('@jintianxiayu/logger'))
+        );
+        expect(consumer.dependencyTree).toContain('"@jintianxiayu/logger"');
+    }
+});
+
+it('lock-operation-logging/检查发布 manifest', () => {
+    const manifest = JSON.parse(readFileSync(join(consumers.none.installedPackage, 'package.json'), 'utf8')) as {
+        readonly dependencies?: Record<string, string>;
+        readonly peerDependencies?: Record<string, string>;
+    };
+    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).toBe('^0.2.0');
+    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).not.toContain('workspace:');
+    expect(manifest.dependencies?.['@jintianxiayu/logger']).toBeUndefined();
+});
+
+it('lock-operation-logging/缺少必需 peer', () => {
+    expect(missingPeerOutput).toContain('@jintianxiayu/logger');
+    expect(missingPeerOutput).toMatch(/missing peer/i);
 });
 
 afterAll(() => {

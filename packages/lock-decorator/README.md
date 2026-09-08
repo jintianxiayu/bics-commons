@@ -8,6 +8,7 @@
 - [特性](#特性)
 - [快速开始](#快速开始)
 - [使用示例](#使用示例)
+- [锁操作日志](#锁操作日志)
 - [API](#api)
 - [连接与兼容范围](#连接与兼容范围)
 - [迁移到 0.2.0](#迁移到-020)
@@ -19,8 +20,11 @@
 Node.js 要求：`^20.19.0 || ^22.13.0 || >=24.0.0`。
 
 ```bash
-pnpm add @jintianxiayu/lock-decorator reflect-metadata
+pnpm add @jintianxiayu/lock-decorator @jintianxiayu/logger reflect-metadata
 ```
+
+`@jintianxiayu/logger` 是必需 peer dependency。应用应在第一次锁操作前初始化 Logger，并在退出时统一等待
+`LoggerFactory.shutdown()`；lock 包本身不会初始化或关闭 Logger。
 
 使用 Redis 时，直接安装所选客户端：
 
@@ -53,15 +57,68 @@ pnpm add redis@5
 - 看门狗按配置续期；支持方法级、字符串和函数式 key。
 - 锁竞争可配置重试，耗尽后抛出 `LockAcquisitionError`。
 - 自定义 `LockProvider` 可接入其他锁后端。
+- 关键锁节点使用应用共享的命名 Logger 输出结构化事件，日志失败不会改变锁或业务结果。
 
 ## 快速开始
 
-以下两个完整示例任选其一。实际项目通常在应用启动时注册 Provider，在应用关闭时释放共享连接。
+先按“Logger 初始化”完成应用级日志生命周期，再从两个 Redis 示例中任选其一。实际项目通常在应用启动时注册
+Provider，在应用关闭时释放共享连接。
+
+### Logger 初始化
+
+下面的完整示例使用自定义 Provider，因此不需要 Redis；消费测试会从 README 提取、编译并执行它。
+
+```typescript
+import 'reflect-metadata';
+import { LoggerFactory } from '@jintianxiayu/logger';
+import { DistributedLock, LockProviderRegistry, type LockProvider } from '@jintianxiayu/lock-decorator';
+
+const provider: LockProvider = {
+    acquire: async () => 'example-token',
+    renew: async () => true,
+    release: async () => true,
+};
+
+class ExampleService {
+    @DistributedLock({ renewInterval: 30000 })
+    async run(): Promise<string> {
+        return 'completed';
+    }
+}
+
+async function main(): Promise<void> {
+    LoggerFactory.init({
+        root: { console: { enabled: false }, file: { enabled: false } },
+        loggers: {
+            '@jintianxiayu/lock-decorator': {
+                level: 'debug',
+                console: { enabled: false },
+                file: { enabled: false },
+            },
+        },
+        processErrors: { uncaughtException: false, unhandledRejection: false, exitOnError: false },
+    });
+    try {
+        LockProviderRegistry.register('example', provider);
+        LockProviderRegistry.setDefault('example');
+        await new ExampleService().run();
+    } finally {
+        LockProviderRegistry.clear();
+        await LoggerFactory.shutdown({ timeout: 2000 });
+    }
+}
+
+main().catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+});
+```
 
 ### ioredis
 
 ```typescript
 import 'reflect-metadata';
+import { LoggerFactory } from '@jintianxiayu/logger';
 import Redis from 'ioredis';
 import {
     createIoredisLockClient,
@@ -79,6 +136,7 @@ class OrderService {
 
 /** 建立示例连接、执行一次业务，并由应用关闭连接。 */
 async function main(): Promise<void> {
+    LoggerFactory.init();
     const redis = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', { lazyConnect: true });
     redis.on('error', (error: Error) => console.error(error));
     try {
@@ -88,6 +146,7 @@ async function main(): Promise<void> {
         console.log(await new OrderService().dailySettlement());
     } finally {
         redis.disconnect();
+        await LoggerFactory.shutdown({ timeout: 2000 });
     }
 }
 
@@ -101,6 +160,7 @@ main().catch((error: unknown) => {
 
 ```typescript
 import 'reflect-metadata';
+import { LoggerFactory } from '@jintianxiayu/logger';
 import { createClient } from 'redis';
 import {
     createNodeRedisLockClient,
@@ -118,6 +178,7 @@ class OrderService {
 
 /** 建立示例连接、执行一次业务，并由应用关闭连接。 */
 async function main(): Promise<void> {
+    LoggerFactory.init();
     const redis = createClient({ url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379' });
     redis.on('error', (error: Error) => console.error(error));
     try {
@@ -129,6 +190,7 @@ async function main(): Promise<void> {
         if (redis.isOpen) {
             redis.destroy();
         }
+        await LoggerFactory.shutdown({ timeout: 2000 });
     }
 }
 
@@ -234,6 +296,36 @@ try {
 }
 ```
 
+## 锁操作日志
+
+所有事件使用名称 `@jintianxiayu/lock-decorator` 的 Logger。正常及高频事件使用 `debug`，竞争耗尽和所有权
+丢失使用 `warn`，Provider 或锁操作抛错使用 `error`；不会输出 `info` 事件。应用可通过同名 Logger profile
+筛选这些事件。
+
+| level   | event                      | 含义                          |
+| ------- | -------------------------- | ----------------------------- |
+| `debug` | `lock.acquire_started`     | 开始获取锁                    |
+| `debug` | `lock.acquire_retry`       | 竞争失败且将继续重试          |
+| `debug` | `lock.acquired`            | 获取锁成功                    |
+| `debug` | `lock.watchdog_started`    | 已启动 Watchdog               |
+| `debug` | `lock.watchdog_skipped`    | 当前配置不启动 Watchdog       |
+| `debug` | `lock.renewed`             | 一次续期成功                  |
+| `debug` | `lock.execution_started`   | 即将调用业务方法              |
+| `debug` | `lock.execution_completed` | 业务方法成功或异常结束        |
+| `debug` | `lock.release_started`     | 已停止 Watchdog并开始释放锁   |
+| `debug` | `lock.released`            | 释放锁成功                    |
+| `warn`  | `lock.acquire_exhausted`   | 获取重试耗尽                  |
+| `warn`  | `lock.ownership_lost`      | 续期或释放时已不再持有该锁    |
+| `error` | `lock.operation_failed`    | Provider 解析或锁操作抛出异常 |
+
+元数据只包含按事件需要的类/方法名、尝试次数、有效配置、耗时、阶段和结果。完整最终 key、key 派生值、token、方法
+参数、业务返回值、业务异常内容和 resolver 异常内容都不会写入 message 或 metadata。基础设施异常只出现在
+`lock.operation_failed` 的 `error` 字段，并由 Logger 的既有规范化与脱敏规则处理；`traceId` 由
+`LoggerContext` 自动关联，lock metadata 不重复保存它。
+
+Logger 获取、配置或同步写入失败会被 lock 包隔离，不会改变获取次数、业务返回值、原异常、续期或释放顺序；
+lock 包也不会使用 `console` 建立第二输出通道。
+
 ## API
 
 ### @DistributedLock(options?)
@@ -287,9 +379,12 @@ TTL 使用毫秒。调用方应传入正整数；本包不修复非法 TTL、不
 
 ### Watchdog
 
-`new Watchdog({ provider, key, token, ttl, interval })` 创建定时续期器；调用 `start()` 启动，`stop()` 停止。`renew()` 返回 `false` 时停止续期。装饰器会在业务结束时停止它。
+`new Watchdog({ provider, key, token, ttl, interval })` 创建定时续期器；调用 `start()` 启动，`stop()` 停止。
+`renew()` 返回 `false` 时记录所有权丢失并停止续期；Promise 拒绝会在定时器边界被捕获、记录并停止后续续期，
+不会形成未处理拒绝或中断已经开始的业务。装饰器仍会在业务结束时停止 Watchdog 并尝试释放原 token。
 
-当前限制：定时续期的 Promise 拒绝尚未捕获；释放锁异常可能覆盖原业务异常。这两项既有行为没有在本次客户端适配中调整。
+当前限制：慢续期仍可能重叠，重复调用 `start()` 仍会创建多个定时器；慢 acquire 后的剩余租期不重新校验。
+释放锁异常仍可能覆盖原业务异常。这些行为不在本次日志变更范围内。
 
 ## 连接与兼容范围
 
@@ -300,7 +395,8 @@ TTL 使用毫秒。调用方应传入正整数；本包不修复非法 TTL、不
 
 ## 迁移到 0.2.0
 
-本次变更的目标版本为 **0.2.0**，包含构造签名变更；实际版本以发布结果为准。
+本次变更的目标版本为 **0.2.0**，包含 Redis Provider 构造签名变化、Logger required peer 和 Watchdog
+续期拒绝语义变化；实际版本以发布结果为准。
 
 原 `0.1.x` 初始化：
 
@@ -322,6 +418,10 @@ new RedisLockProvider(createNodeRedisLockClient(redis));
 
 从本包导入对应工厂，并在应用的直接依赖中声明所用客户端。注册表、业务装饰器及自定义 `LockProvider` 用法保持不变，不需要迁移或删除已有锁。确认最终 key 一致后可分批升级；回退到 `0.1.3` 时恢复旧构造方式。
 
+升级时还需显式安装兼容的 `@jintianxiayu/logger`，在第一次锁调用前完成 `LoggerFactory.init()`，并由应用
+统一 `shutdown()`。若依赖方曾通过全局 `unhandledRejection` 观察续期错误，升级后应改为订阅
+`lock.operation_failed` 且 `operation: renew` 的 error 日志；业务仍继续执行，结束时仍尝试释放锁。
+
 ## 开发验证
 
 在仓库根目录执行受影响包测试：
@@ -332,7 +432,9 @@ pnpm --filter @jintianxiayu/lock-decorator test
 
 真实 Redis 用例需要设置 `LOCK_DECORATOR_TEST_REDIS_URL` 指向专用测试实例；未设置时会明确跳过。本次变更的集成验收要求实际执行这些用例。测试使用唯一 key，只清理自身创建的数据。
 
-包消费测试会构建 tarball，在 workspace 外安装三个临时项目，验证无客户端、仅 ioredis、仅 node-redis 的依赖隔离、严格类型检查和运行入口。三个快速开始示例会直接从本 README 提取并参与消费项目编译。
+包消费测试会构建 lock 与 Logger tarball，在 workspace 外安装三个临时项目，验证 required peer 单例解析、
+无客户端/仅 ioredis/仅 node-redis 的依赖隔离、严格类型检查和运行入口。Logger 初始化示例会直接从本
+README 提取、编译并执行；三个客户端示例会参与严格编译。
 
 ## License
 

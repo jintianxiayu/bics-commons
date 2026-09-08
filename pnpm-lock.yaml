@@ -77,6 +77,9 @@ importers:
         specifier: ^11.0.0
         version: 11.1.1
     devDependencies:
+      '@jintianxiayu/logger':
+        specifier: workspace:^
+        version: link:../logger
       ioredis:
         specifier: ^5.10.1
         version: 5.11.0(supports-color@8.1.1)

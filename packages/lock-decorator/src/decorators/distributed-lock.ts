@@ -1,6 +1,8 @@
 import 'reflect-metadata';
+import { performance } from 'node:perf_hooks';
 import { LockProviderRegistry } from '../core/lock-provider-registry';
 import { Watchdog } from '../core/watchdog';
+import { logLockEvent, type LockLogContext } from '../core/lock-logger';
 import { LockAcquisitionError } from '../errors/lock-acquisition-error';
 import {
     DistributedLockOptions,
@@ -18,6 +20,13 @@ interface LockAcquisitionRequest {
     readonly ttl: number;
     readonly retryCount: number;
     readonly retryDelay: number;
+    readonly startedAt: number;
+    readonly logContext: LockLogContext;
+}
+
+interface LockAcquisitionResult {
+    readonly token: string | null;
+    readonly attempts: number;
 }
 
 /** 看门狗启动参数与 Watchdog 构造契约保持一致。 */
@@ -27,6 +36,13 @@ interface WatchdogStartRequest {
     readonly token: string;
     readonly ttl: number;
     readonly interval: number;
+}
+
+interface LockReleaseRequest {
+    readonly provider: LockProvider;
+    readonly key: string;
+    readonly token: string;
+    readonly logContext: LockLogContext;
 }
 
 /**
@@ -55,30 +71,106 @@ export function DistributedLock(
         }
 
         const originalMethod = descriptor.value as (...args: unknown[]) => Promise<unknown>;
+        const logContext = {
+            className: target.constructor?.name ?? 'Anonymous',
+            methodName: String(propertyKey),
+        } as const;
 
         descriptor.value = async function (...args: unknown[]): Promise<unknown> {
-            const provider = LockProviderRegistry.get();
+            let provider: LockProvider;
+            try {
+                provider = LockProviderRegistry.get();
+            } catch (error) {
+                logLockEvent('lock.operation_failed', {
+                    ...logContext,
+                    operation: 'provider_resolution',
+                    error,
+                });
+                throw error;
+            }
             const ttl = options.ttl ?? DEFAULT_TTL;
             const renewInterval = options.renewInterval ?? DEFAULT_RENEW_INTERVAL;
             const retryCount = options.retryCount ?? DEFAULT_RETRY_COUNT;
             const retryDelay = options.retryDelay ?? DEFAULT_RETRY_DELAY;
-            const lockKey = resolveLockKey(target, propertyKey, options, args);
-            const token = await acquireLockWithRetry({ provider, key: lockKey, ttl, retryCount, retryDelay });
+            let lockKey: string;
+            try {
+                lockKey = resolveLockKey(target, propertyKey, options, args);
+            } catch (error) {
+                logLockEvent('lock.operation_failed', {
+                    ...logContext,
+                    operation: 'key_resolution',
+                    reason: 'resolver_error',
+                });
+                throw error;
+            }
+            const maxAttempts = retryCount + 1;
+            logLockEvent('lock.acquire_started', {
+                ...logContext,
+                maxAttempts,
+                ttlMs: ttl,
+                retryDelayMs: retryDelay,
+            });
+            const acquisitionStartedAt = performance.now();
+            const acquisition = await acquireLockWithRetry({
+                provider,
+                key: lockKey,
+                ttl,
+                retryCount,
+                retryDelay,
+                startedAt: acquisitionStartedAt,
+                logContext,
+            });
 
-            if (token === null) {
+            if (acquisition.token === null) {
+                logLockEvent('lock.acquire_exhausted', {
+                    ...logContext,
+                    ...(acquisition.attempts > 0 ? { attempt: acquisition.attempts } : {}),
+                    maxAttempts,
+                    ttlMs: ttl,
+                    retryDelayMs: retryDelay,
+                    durationMs: elapsedSince(acquisitionStartedAt),
+                });
                 throw new LockAcquisitionError(lockKey, retryCount);
             }
+            const token = acquisition.token;
+            logLockEvent('lock.acquired', {
+                ...logContext,
+                attempt: acquisition.attempts,
+                maxAttempts,
+                ttlMs: ttl,
+                durationMs: elapsedSince(acquisitionStartedAt),
+            });
 
-            const watchdog =
-                renewInterval < ttl
-                    ? startWatchdog({ provider, key: lockKey, token, ttl, interval: renewInterval })
-                    : null;
+            let watchdog: Watchdog | null = null;
+            if (renewInterval < ttl) {
+                watchdog = startWatchdog({ provider, key: lockKey, token, ttl, interval: renewInterval });
+                logLockEvent('lock.watchdog_started', {
+                    ...logContext,
+                    ttlMs: ttl,
+                    renewIntervalMs: renewInterval,
+                });
+            } else {
+                logLockEvent('lock.watchdog_skipped', {
+                    ...logContext,
+                    ttlMs: ttl,
+                    renewIntervalMs: renewInterval,
+                    reason: 'watchdog_disabled',
+                });
+            }
 
             try {
-                return await originalMethod.apply(this, args);
+                logLockEvent('lock.execution_started', logContext);
+                try {
+                    const result = await originalMethod.apply(this, args);
+                    logLockEvent('lock.execution_completed', { ...logContext, outcome: 'success' });
+                    return result;
+                } catch (error) {
+                    logLockEvent('lock.execution_completed', { ...logContext, outcome: 'business_error' });
+                    throw error;
+                }
             } finally {
                 watchdog?.stop();
-                await provider.release(lockKey, token);
+                await releaseLock({ provider, key: lockKey, token, logContext });
             }
         };
 
@@ -117,19 +209,45 @@ async function acquireLockWithRetry({
     ttl,
     retryCount,
     retryDelay,
-}: LockAcquisitionRequest): Promise<string | null> {
+    startedAt,
+    logContext,
+}: LockAcquisitionRequest): Promise<LockAcquisitionResult> {
     let attempts = 0;
     while (attempts <= retryCount) {
-        const token = await provider.acquire(key, ttl);
-        if (token !== null) {
-            return token;
+        const attempt = attempts + 1;
+        let token: string | null;
+        try {
+            token = await provider.acquire(key, ttl);
+        } catch (error) {
+            logLockEvent('lock.operation_failed', {
+                ...logContext,
+                attempt,
+                maxAttempts: retryCount + 1,
+                ttlMs: ttl,
+                retryDelayMs: retryDelay,
+                durationMs: elapsedSince(startedAt),
+                operation: 'acquire',
+                error,
+            });
+            throw error;
         }
-        attempts++;
+        attempts = attempt;
+        if (token !== null) {
+            return { token, attempts };
+        }
         if (attempts <= retryCount) {
+            logLockEvent('lock.acquire_retry', {
+                ...logContext,
+                attempt,
+                maxAttempts: retryCount + 1,
+                ttlMs: ttl,
+                retryDelayMs: retryDelay,
+                durationMs: elapsedSince(startedAt),
+            });
             await sleep(retryDelay);
         }
     }
-    return null;
+    return { token: null, attempts };
 }
 
 /**
@@ -145,7 +263,37 @@ function startWatchdog(request: WatchdogStartRequest): Watchdog {
     return watchdog;
 }
 
+/**
+ * 记录并执行一次释放；拒绝仍以原异常传播给 decorator 的 finally 边界。
+ * @param request Provider、锁标识及安全日志上下文。
+ */
+async function releaseLock({ provider, key, token, logContext }: LockReleaseRequest): Promise<void> {
+    logLockEvent('lock.release_started', { ...logContext, phase: 'release' });
+    try {
+        const released = await provider.release(key, token);
+        if (released) {
+            logLockEvent('lock.released', { ...logContext, phase: 'release' });
+            return;
+        }
+        logLockEvent('lock.ownership_lost', { ...logContext, phase: 'release' });
+    } catch (error) {
+        logLockEvent('lock.operation_failed', {
+            ...logContext,
+            operation: 'release',
+            phase: 'release',
+            error,
+        });
+        throw error;
+    }
+}
+
 /** 延迟函数 */
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 以单调时钟生成非负有限耗时。 */
+function elapsedSince(startedAt: number): number {
+    const duration = performance.now() - startedAt;
+    return Number.isFinite(duration) ? Math.max(0, duration) : 0;
 }

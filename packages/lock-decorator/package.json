@@ -14,10 +14,14 @@
         "reflect-metadata": "^0.2.2",
         "uuid": "^11.0.0"
     },
+    "peerDependencies": {
+        "@jintianxiayu/logger": "workspace:^"
+    },
     "publishConfig": {
         "access": "public"
     },
     "devDependencies": {
+        "@jintianxiayu/logger": "workspace:^",
         "ioredis": "^5.10.1",
         "redis": "^5.12.1"
     }

@@ -1,4 +1,5 @@
 import { LockProvider } from './lock-provider';
+import { logLockEvent } from './lock-logger';
 
 /** 看门狗配置 */
 interface WatchdogConfig {
@@ -7,6 +8,36 @@ interface WatchdogConfig {
     token: string;
     ttl: number;
     interval: number;
+}
+
+/**
+ * 在定时器 Promise 边界内收敛一次续期结果，避免 Provider rejection 成为未处理拒绝。
+ * @param config 当前 Watchdog 使用的锁与时间配置。
+ * @param stop 停止后续续期的回调。
+ */
+async function renewLock(config: WatchdogConfig, stop: () => void): Promise<void> {
+    const { provider, key, token, ttl, interval } = config;
+    try {
+        const renewed = await provider.renew(key, token, ttl);
+        if (renewed) {
+            logLockEvent('lock.renewed', { ttlMs: ttl, renewIntervalMs: interval });
+            return;
+        }
+        logLockEvent('lock.ownership_lost', {
+            ttlMs: ttl,
+            renewIntervalMs: interval,
+            phase: 'renew',
+        });
+        stop();
+    } catch (error) {
+        logLockEvent('lock.operation_failed', {
+            ttlMs: ttl,
+            renewIntervalMs: interval,
+            operation: 'renew',
+            error,
+        });
+        stop();
+    }
 }
 
 /**
@@ -20,12 +51,8 @@ export class Watchdog {
 
     /** 启动看门狗续期 */
     start(): void {
-        this.timer = setInterval(async () => {
-            const { provider, key, token, ttl } = this.config;
-            const ok = await provider.renew(key, token, ttl);
-            if (!ok) {
-                this.stop();
-            }
+        this.timer = setInterval(() => {
+            void renewLock(this.config, () => this.stop());
         }, this.config.interval);
     }
 

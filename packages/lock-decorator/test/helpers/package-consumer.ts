@@ -92,6 +92,19 @@ export function packCurrentPackage(root: string): string {
     return archive;
 }
 
+/** 构建并打包 workspace Logger，供外部消费 fixture 显式满足 required peer。 */
+export function packLoggerPackage(root: string): string {
+    const loggerRoot = resolve(packageRoot, '../logger');
+    runCommand({
+        executable: process.execPath,
+        args: [require.resolve('typescript/bin/tsc'), '-p', join(loggerRoot, 'tsconfig.json')],
+        cwd: loggerRoot,
+    });
+    const archive = join(root, 'logger.tgz');
+    runPnpm(['pack', '--out', archive, '--json'], loggerRoot);
+    return archive;
+}
+
 /** 读取实际安装版本，消费项目不通过范围解析无关的新版本。 */
 function installedVersion(name: string): string {
     const localManifest = join(packageRoot, 'node_modules', name, 'package.json');
@@ -109,18 +122,21 @@ function installedVersion(name: string): string {
 export function installConsumer(request: {
     root: string;
     archive: string;
+    loggerArchive: string;
     client: 'none' | 'redis' | 'ioredis';
     source: string;
     readmeSource: string;
+    loggerSource: string;
 }): PackageConsumer {
     const directory = join(request.root, request.client);
     mkdirSync(directory);
     const dependencies: Record<string, string> = {
         '@jintianxiayu/lock-decorator': `file:${request.archive.replaceAll('\\', '/')}`,
+        '@jintianxiayu/logger': `file:${request.loggerArchive.replaceAll('\\', '/')}`,
+        'reflect-metadata': installedVersion('reflect-metadata'),
     };
     if (request.client !== 'none') {
         dependencies[request.client] = installedVersion(request.client);
-        dependencies['reflect-metadata'] = installedVersion('reflect-metadata');
     }
     writeFileSync(
         join(directory, 'package.json'),
@@ -148,11 +164,12 @@ export function installConsumer(request: {
                 experimentalDecorators: true,
                 emitDecoratorMetadata: true,
             },
-            include: ['consumer.ts', 'readme-example.ts'],
+            include: ['consumer.ts', 'readme-example.ts', 'logger-example.ts'],
         })
     );
     writeFileSync(join(directory, 'consumer.ts'), request.source);
     writeFileSync(join(directory, 'readme-example.ts'), request.readmeSource);
+    writeFileSync(join(directory, 'logger-example.ts'), request.loggerSource);
     runPnpm(
         [
             'install',
@@ -169,11 +186,41 @@ export function installConsumer(request: {
         cwd: directory,
     });
     runCommand({ executable: process.execPath, args: [join(directory, 'out/consumer.js')], cwd: directory });
+    runCommand({ executable: process.execPath, args: [join(directory, 'out/logger-example.js')], cwd: directory });
     return {
         directory,
         installedPackage: join(directory, 'node_modules/@jintianxiayu/lock-decorator'),
         dependencyTree: runPnpm(['list', '--prod', '--depth', '100', '--json'], directory),
     };
+}
+
+/**
+ * 在不提供 Logger 的干净项目中安装 lock tarball，并返回 pnpm 的 peer 诊断文本。
+ * @param root 当前测试拥有的临时根目录。
+ * @param archive lock-decorator tarball。
+ */
+export function installWithoutLogger(root: string, archive: string): string {
+    const directory = join(root, 'missing-peer');
+    mkdirSync(directory);
+    writeFileSync(
+        join(directory, 'package.json'),
+        JSON.stringify({
+            name: 'lock-consumer-missing-peer',
+            private: true,
+            dependencies: {
+                '@jintianxiayu/lock-decorator': `file:${archive.replaceAll('\\', '/')}`,
+            },
+        })
+    );
+    const installOutput = runPnpm(
+        ['install', '--ignore-scripts', '--store-dir', join(root, 'store'), '--config.auto-install-peers=false'],
+        directory
+    );
+    try {
+        return `${installOutput}\n${runPnpm(['peers', 'check'], directory)}`;
+    } catch (error) {
+        return `${installOutput}\n${error instanceof Error ? error.message : String(error)}`;
+    }
 }
 
 /** 仅删除本测试通过 mkdtemp 创建且已确认位于系统临时目录内的目录。 */

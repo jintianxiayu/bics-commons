@@ -1,3 +1,9 @@
+jest.mock('@jintianxiayu/logger', () => ({
+    LoggerFactory: {
+        getLogger: jest.fn(() => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() })),
+    },
+}));
+
 import 'reflect-metadata';
 import { DistributedLock } from '../src/decorators/distributed-lock';
 import { LockProviderRegistry } from '../src/core/lock-provider-registry';
