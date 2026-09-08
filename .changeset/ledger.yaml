@@ -1,0 +1,16 @@
+"@jintianxiayu/cache-decorator@1.0.0":
+  dir: packages/cache-decorator
+  intents:
+    - gentle-heads-look
+"@jintianxiayu/http-client-decorator@1.0.0":
+  dir: packages/http-client-decorator
+  intents:
+    - gentle-heads-look
+"@jintianxiayu/lock-decorator@1.0.0":
+  dir: packages/lock-decorator
+  intents:
+    - gentle-heads-look
+"@jintianxiayu/logger@1.0.0":
+  dir: packages/logger
+  intents:
+    - gentle-heads-look

@@ -7,6 +7,7 @@ import {
     PackageConsumer,
     packCurrentPackage,
     packLoggerPackage,
+    packageRoot,
     readReadmeExample,
     removePackageTestRoot,
     runCommand,
@@ -231,7 +232,10 @@ it('cache-operation-logging/P02 发布 manifest 将 Logger workspace peer 转为
         readonly dependencies?: Record<string, string>;
         readonly peerDependencies?: Record<string, string>;
     };
-    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).toBe('^0.2.0');
+    const loggerManifest = JSON.parse(readFileSync(join(packageRoot, '../logger/package.json'), 'utf8')) as {
+        readonly version: string;
+    };
+    expect(manifest.peerDependencies?.['@jintianxiayu/logger']).toBe(`^${loggerManifest.version}`);
     expect(manifest.peerDependencies?.['@jintianxiayu/logger']).not.toContain('workspace:');
     expect(manifest.dependencies?.['@jintianxiayu/logger']).toBeUndefined();
 });
