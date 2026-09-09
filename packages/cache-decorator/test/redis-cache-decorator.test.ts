@@ -12,6 +12,9 @@ interface SharedRedisState {
     readonly values: Map<string, string>;
     readonly writes: Array<{ readonly key: string; readonly value: string; readonly ttlSeconds?: number }>;
     getError?: unknown;
+    setError?: unknown;
+    deleteError?: unknown;
+    scanError?: unknown;
 }
 
 function createSharedRedisState(): SharedRedisState {
@@ -30,24 +33,36 @@ function createSharedIoredisSource(state: SharedRedisState, keyPrefix: string): 
             return Promise.resolve(state.values.get(physicalKey(key)) ?? null);
         },
         set(key: string, value: string): Promise<unknown> {
+            if (state.setError !== undefined) {
+                return Promise.reject(state.setError);
+            }
             const resolvedKey = physicalKey(key);
             state.values.set(resolvedKey, value);
             state.writes.push({ key: resolvedKey, value });
             return Promise.resolve('OK');
         },
         setex(key: string, ttlSeconds: number, value: string): Promise<unknown> {
+            if (state.setError !== undefined) {
+                return Promise.reject(state.setError);
+            }
             const resolvedKey = physicalKey(key);
             state.values.set(resolvedKey, value);
             state.writes.push({ key: resolvedKey, value, ttlSeconds });
             return Promise.resolve('OK');
         },
         del(...keys: string[]): Promise<unknown> {
+            if (state.deleteError !== undefined) {
+                return Promise.reject(state.deleteError);
+            }
             for (const key of keys) {
                 state.values.delete(physicalKey(key));
             }
             return Promise.resolve(keys.length);
         },
         scan(..._args: Parameters<IoredisCacheClientSource['scan']>): Promise<unknown> {
+            if (state.scanError !== undefined) {
+                return Promise.reject(state.scanError);
+            }
             return Promise.resolve(['0', []]);
         },
         flushdb(): Promise<unknown> {
@@ -67,16 +82,25 @@ function createSharedNodeRedisSource(state: SharedRedisState): NodeRedisCacheCli
             return Promise.resolve(state.values.get(key) ?? null);
         },
         set(key: string, value: string): Promise<unknown> {
+            if (state.setError !== undefined) {
+                return Promise.reject(state.setError);
+            }
             state.values.set(key, value);
             state.writes.push({ key, value });
             return Promise.resolve('OK');
         },
         setEx(key: string, ttlSeconds: number, value: string): Promise<unknown> {
+            if (state.setError !== undefined) {
+                return Promise.reject(state.setError);
+            }
             state.values.set(key, value);
             state.writes.push({ key, value, ttlSeconds });
             return Promise.resolve('OK');
         },
         del(keys: string | string[]): Promise<unknown> {
+            if (state.deleteError !== undefined) {
+                return Promise.reject(state.deleteError);
+            }
             const deletedKeys = typeof keys === 'string' ? [keys] : keys;
             for (const key of deletedKeys) {
                 state.values.delete(key);
@@ -84,6 +108,9 @@ function createSharedNodeRedisSource(state: SharedRedisState): NodeRedisCacheCli
             return Promise.resolve(deletedKeys.length);
         },
         scan(): Promise<unknown> {
+            if (state.scanError !== undefined) {
+                return Promise.reject(state.scanError);
+            }
             return Promise.resolve({ cursor: '0', keys: [] });
         },
         flushDb(): Promise<unknown> {
@@ -510,7 +537,7 @@ it('不可序列化异常 payload 不向 Redis 发送 SET', async () => {
     expect(state.values).toEqual(new Map());
 });
 
-it('Redis GET 失败传播基础设施错误且不调用策略或业务方法', async () => {
+it('Redis GET 失败旁路缓存且不调用异常策略', async () => {
     const state = createSharedRedisState();
     const readError = new Error('GET unavailable');
     state.getError = readError;
@@ -519,7 +546,8 @@ it('Redis GET 失败传播基础设施错误且不调用策略或业务方法', 
     const shouldCache = jest.fn((_error: unknown): boolean => true);
     const encode = jest.fn((error: unknown): unknown => error);
     const decode = jest.fn((payload: unknown): unknown => payload);
-    const businessMethod = jest.fn();
+    const businessResult = { id: 22 };
+    const businessMethod = jest.fn(() => businessResult);
 
     class UserService {
         @Cache('failed-get-errors', {
@@ -531,10 +559,43 @@ it('Redis GET 失败传播基础设施错误且不调用策略或业务方法', 
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(readError);
-    expect(businessMethod).not.toHaveBeenCalled();
+    await expect(new UserService().getUser()).resolves.toBe(businessResult);
+    expect(businessMethod).toHaveBeenCalledTimes(1);
     expect(shouldCache).not.toHaveBeenCalled();
     expect(encode).not.toHaveBeenCalled();
     expect(decode).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([]);
+});
+
+it('redis-cache-client/E07 Redis 写入与淘汰命令失败不改变装饰器业务结果', async () => {
+    const state = createSharedRedisState();
+    state.setError = new Error('SET unavailable');
+    state.deleteError = new Error('DEL unavailable');
+    state.scanError = new Error('SCAN unavailable');
+    const provider = new RedisCacheProvider(createNodeRedisCacheClient(createSharedNodeRedisSource(state)));
+    CacheProviderRegistry.register('failed-commands-node', provider);
+
+    class UserService {
+        @Cache('failed-set-users', { providerName: 'failed-commands-node' })
+        getUser(): string {
+            return 'business-read';
+        }
+
+        @CacheEvict('failed-delete-users', { providerName: 'failed-commands-node', key: 'user-24' })
+        updateUser(): string {
+            return 'business-update';
+        }
+
+        @CacheEvict('failed-scan-users', { providerName: 'failed-commands-node', allEntries: true })
+        clearUsers(): string {
+            return 'business-clear';
+        }
+    }
+
+    const service = new UserService();
+    await expect(service.getUser()).resolves.toBe('business-read');
+    await expect(service.updateUser()).resolves.toBe('business-update');
+    await expect(service.clearUsers()).resolves.toBe('business-clear');
+    await Promise.resolve();
     expect(state.writes).toEqual([]);
 });

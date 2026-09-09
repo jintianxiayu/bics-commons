@@ -37,6 +37,7 @@ interface ChildResult {
 const packageRoot = resolve(__dirname, '..');
 const loggerRoot = resolve(packageRoot, '../logger');
 const fixture = join(__dirname, 'fixtures', 'cache-logger-child.mjs');
+const providerFailureFixture = join(__dirname, 'fixtures', 'cache-provider-failure-child.mjs');
 
 /**
  * 在隔离进程运行真实 Logger fixture，确保关闭流程完整刷新结构化输出。
@@ -47,6 +48,29 @@ const fixture = join(__dirname, 'fixtures', 'cache-logger-child.mjs');
 function runFixture(profileLevel: 'debug' | 'error'): Promise<ChildResult> {
     return new Promise((resolveResult, reject) => {
         const child = spawn(process.execPath, [fixture, profileLevel], {
+            cwd: packageRoot,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        child.stdout.on('data', (chunk: string) => (stdout += chunk));
+        child.stderr.on('data', (chunk: string) => (stderr += chunk));
+        child.once('error', reject);
+        child.once('exit', (code) => resolveResult({ code, stdout, stderr }));
+    });
+}
+
+/**
+ * 在严格未处理 rejection 模式运行 Provider 异步失败 fixture。
+ * @returns 子进程退出码和完整标准流。
+ * @throws 子进程无法启动时拒绝。
+ */
+function runProviderFailureFixture(): Promise<ChildResult> {
+    return new Promise((resolveResult, reject) => {
+        const child = spawn(process.execPath, ['--unhandled-rejections=strict', providerFailureFixture], {
             cwd: packageRoot,
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
@@ -119,6 +143,12 @@ it('cache-operation-logging/Logger 配置筛选输出且复用应用提供的唯
         traceId: 'cache-fixture-trace',
         meta: { event: 'cache.operation_failed', operation: 'read' },
     });
+});
+
+it('异步缓存写入和单 key 删除拒绝不会触发未处理 rejection', async () => {
+    const result = await runProviderFailureFixture();
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
 });
 
 it('cache decorator 源码不读取或写入 LoggerContext', () => {

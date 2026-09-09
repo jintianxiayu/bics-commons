@@ -307,13 +307,12 @@ it('cache-operation-logging/C06 回填后的重复调用命中缓存且不重复
     expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.write_dispatched', 'cache.hit']);
 });
 
-it('cache-operation-logging/F04 异步 set 拒绝不会被等待或消费', async () => {
+it('cache-operation-logging/F04 异步 set 拒绝被观察但不改变业务结果', async () => {
     let rejectWrite: ((reason?: unknown) => void) | undefined;
     const writeError = new Error('async write failed');
     const writePromise = new Promise<void>((_resolve, reject) => {
         rejectWrite = reject;
     });
-    const observedWriteFailure = writePromise.catch((error: unknown) => error);
     const thenSpy = jest.spyOn(writePromise, 'then');
     const provider = createProvider(undefined);
     provider.set.mockReturnValue(writePromise);
@@ -328,7 +327,7 @@ it('cache-operation-logging/F04 异步 set 拒绝不会被等待或消费', asyn
 
     await expect(new UserService().getUser()).resolves.toBe(10);
     expect(provider.set).toHaveBeenCalledTimes(1);
-    expect(thenSpy).not.toHaveBeenCalled();
+    expect(thenSpy).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.write_dispatched']);
     expect(events(mockLogger.debug)).not.toContain('cache.write_completed');
 
@@ -336,15 +335,66 @@ it('cache-operation-logging/F04 异步 set 拒绝不会被等待或消费', asyn
         throw new Error('Write rejecter was not initialized');
     }
     rejectWrite(writeError);
-    await expect(observedWriteFailure).resolves.toBe(writeError);
+    await Promise.resolve();
+    expect(loggedMetadata(mockLogger.error)).toContainEqual({
+        event: 'cache.operation_failed',
+        cacheName: 'async-write-users',
+        methodName: 'getUser',
+        providerName: 'async-write-provider',
+        operation: 'write',
+        error: writeError,
+    });
 });
 
-it('cache-operation-logging/F01 Provider 解析失败记录原始注册表异常且不执行业务', async () => {
+it('cache-operation-logging/F07 异常条目异步 set 拒绝被消费且保留原业务异常', async () => {
+    let rejectWrite: ((reason?: unknown) => void) | undefined;
+    const writeError = new Error('async error entry write failed');
+    const writePromise = new Promise<void>((_resolve, reject) => {
+        rejectWrite = reject;
+    });
+    const provider = createProvider(undefined);
+    provider.set.mockReturnValue(writePromise);
+    CacheProviderRegistry.register('async-error-write-provider', provider.provider);
+    const businessError = new Error('original business error');
+
+    class UserService {
+        @Cache('async-error-write-users', {
+            providerName: 'async-error-write-provider',
+            errorCache: { ttl: 5 },
+        })
+        getUser(): never {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.write_dispatched']);
+    expect(mockLogger.error).not.toHaveBeenCalled();
+
+    if (!rejectWrite) {
+        throw new Error('Write rejecter was not initialized');
+    }
+    rejectWrite(writeError);
+    await Promise.resolve();
+    expect(loggedMetadata(mockLogger.error)).toEqual([
+        {
+            event: 'cache.operation_failed',
+            cacheName: 'async-error-write-users',
+            methodName: 'getUser',
+            providerName: 'async-error-write-provider',
+            operation: 'write',
+            error: writeError,
+        },
+    ]);
+});
+
+it('cache-operation-logging/F01 Provider 解析失败记录原始注册表异常并旁路执行业务', async () => {
     const registryError = new Error('provider resolution failed');
     jest.spyOn(CacheProviderRegistry, 'get').mockImplementation(() => {
         throw registryError;
     });
-    const businessMethod = jest.fn();
+    const businessResult = { id: 20 };
+    const businessMethod = jest.fn(() => businessResult);
 
     class UserService {
         @Cache('missing-provider-users', { providerName: 'missing-provider' })
@@ -353,8 +403,8 @@ it('cache-operation-logging/F01 Provider 解析失败记录原始注册表异常
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(registryError);
-    expect(businessMethod).not.toHaveBeenCalled();
+    await expect(new UserService().getUser()).resolves.toBe(businessResult);
+    expect(businessMethod).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).toEqual([]);
     expect(loggedMetadata(mockLogger.error)).toEqual([
         {
@@ -368,11 +418,12 @@ it('cache-operation-logging/F01 Provider 解析失败记录原始注册表异常
     ]);
 });
 
-it('cache-operation-logging/F02 cache-operation-logging/M03 读取失败记录同一错误且不转为 miss', async () => {
+it('cache-operation-logging/F02 cache-operation-logging/M03 读取失败记录同一错误并旁路执行业务', async () => {
     const readError = new Error('redis unavailable');
     const provider = createProvider(Promise.reject(readError));
     CacheProviderRegistry.register('unavailable-provider', provider.provider);
-    const businessMethod = jest.fn();
+    const businessResult = { id: 21 };
+    const businessMethod = jest.fn(() => businessResult);
 
     class UserService {
         @Cache('unavailable-users', { providerName: 'unavailable-provider' })
@@ -381,10 +432,10 @@ it('cache-operation-logging/F02 cache-operation-logging/M03 读取失败记录�
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(readError);
+    await expect(new UserService().getUser()).resolves.toBe(businessResult);
     expect(provider.get).toHaveBeenCalledTimes(1);
     expect(provider.set).not.toHaveBeenCalled();
-    expect(businessMethod).not.toHaveBeenCalled();
+    expect(businessMethod).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).not.toContain('cache.miss');
     expect(loggedMetadata(mockLogger.error)).toEqual([
         {
@@ -511,14 +562,14 @@ it('cache-operation-logging/L03 Logger debug 失败不影响 cache hit', async (
     expect(businessMethod).not.toHaveBeenCalled();
 });
 
-it('cache-operation-logging/L04 Logger error 失败不遮蔽原始读取异常', async () => {
+it('cache-operation-logging/L04 Logger error 失败不影响读取失败后的业务旁路', async () => {
     const readError = new Error('provider read failed');
     const provider = createProvider(Promise.reject(readError));
     CacheProviderRegistry.register('logger-error-provider', provider.provider);
     mockLogger.error.mockImplementationOnce(() => {
         throw new Error('logger error failed');
     });
-    const businessMethod = jest.fn();
+    const businessMethod = jest.fn(() => 'business-result');
 
     class UserService {
         @Cache('logger-error-users', { providerName: 'logger-error-provider' })
@@ -527,12 +578,38 @@ it('cache-operation-logging/L04 Logger error 失败不遮蔽原始读取异常',
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(readError);
-    expect(businessMethod).not.toHaveBeenCalled();
+    await expect(new UserService().getUser()).resolves.toBe('business-result');
+    expect(businessMethod).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).not.toContain('cache.miss');
 });
 
-it('正常结果同步 set 失败只记录一次 write operation 且不进入异常策略', async () => {
+it('cache-operation-logging/L04 Provider 与 Logger 同时失败时保留原业务异常', async () => {
+    const providerError = new Error('provider read failed');
+    const provider = createProvider(Promise.reject(providerError));
+    CacheProviderRegistry.register('logger-business-error-provider', provider.provider);
+    mockLogger.error.mockImplementationOnce(() => {
+        throw new Error('logger error failed');
+    });
+    const businessError = new Error('original business failure');
+    const shouldCache = jest.fn((_error: unknown): boolean => true);
+
+    class UserService {
+        @Cache('logger-business-error-users', {
+            providerName: 'logger-business-error-provider',
+            errorCache: { ttl: 5, shouldCache },
+        })
+        getUser(): never {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(shouldCache).not.toHaveBeenCalled();
+    expect(provider.set).not.toHaveBeenCalled();
+    expect(events(mockLogger.debug)).not.toContain('cache.miss');
+});
+
+it('正常结果同步 set 失败只记录一次 write operation 且保留业务结果', async () => {
     const writeError = new Error('synchronous write failed');
     const provider = createProvider(undefined);
     const shouldCache = jest.fn((_error: unknown): boolean => true);
@@ -551,7 +628,7 @@ it('正常结果同步 set 失败只记录一次 write operation 且不进入异
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(writeError);
+    await expect(new UserService().getUser()).resolves.toBe(12);
     expect(provider.set).toHaveBeenCalledTimes(1);
     expect(shouldCache).not.toHaveBeenCalled();
     expect(loggedMetadata(mockLogger.error)).toContainEqual({

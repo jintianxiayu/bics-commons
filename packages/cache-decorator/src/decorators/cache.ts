@@ -80,6 +80,11 @@ interface CacheWriteRequest<T> {
     readonly logContext: CacheLogContext;
 }
 
+type CacheLookupResult<T> =
+    | { readonly type: 'hit'; readonly provider: CacheProvider; readonly entry: CacheEntry<T> }
+    | { readonly type: 'miss'; readonly provider: CacheProvider }
+    | { readonly type: 'bypass' };
+
 type CacheReadResult<T> =
     | { readonly type: 'value'; readonly value: T }
     | { readonly type: 'error'; readonly error: unknown }
@@ -96,50 +101,40 @@ interface BusinessErrorRequest {
 const pendingCache = new PendingCache();
 
 /**
- * 获取配置指向的缓存 Provider，并在解析失败时记录原始错误。
+ * 获取配置指向的缓存 Provider，并把解析失败转换为缓存旁路。
  * @param providerName decorator 配置中的 Provider 名称。
  * @param logContext 当前方法的稳定日志上下文。
- * @returns 已注册的缓存 Provider。
- * @throws Provider 注册表抛出的原始错误。
+ * @returns 已注册的缓存 Provider；解析失败时返回 undefined。
  */
-function resolveCacheProvider(providerName: string | undefined, logContext: CacheLogContext): CacheProvider {
+function resolveCacheProvider(
+    providerName: string | undefined,
+    logContext: CacheLogContext
+): CacheProvider | undefined {
     try {
         return CacheProviderRegistry.get(providerName);
     } catch (error) {
         logCacheEvent('cache.operation_failed', { ...logContext, operation: 'provider_resolution', error });
-        throw error;
+        return undefined;
     }
 }
 
 /**
- * 保持 fire-and-forget 语义提交缓存写入，仅捕获调用当下可观察的同步失败。
+ * 保持 fire-and-forget 语义提交缓存写入，并消费同步或异步 Provider 失败。
  * @param request 写入所需 Provider、entry 和无业务数据日志上下文。
- * @returns 无返回值；异步写入 Promise 不会被等待或消费。
- * @throws Provider set 同步抛出的原始错误。
+ * @returns 无返回值；写入失败仅记录日志，不影响业务结果。
  */
 function dispatchCacheWrite<T>(request: CacheWriteRequest<T>): void {
+    let operation: void | Promise<void>;
     try {
-        request.provider.set(request.cacheKey, request.entry, request.ttl);
-    } catch (error) {
-        logCacheEvent('cache.operation_failed', { ...request.logContext, operation: 'write', error });
-        throw error;
-    }
-    logCacheEvent('cache.write_dispatched', { ...request.logContext, entryType: request.entryType });
-}
-
-/**
- * 提交异常条目写入；同步 Provider 失败只记录基础设施错误，不遮蔽已经发生的业务异常。
- * @param request 异常写入所需 Provider、entry、TTL 和稳定日志上下文。
- * @returns 无返回值；异步写入 Promise 保持既有 fire-and-forget 边界。
- */
-function dispatchCacheErrorWrite(request: CacheWriteRequest<never>): void {
-    try {
-        request.provider.set(request.cacheKey, request.entry, request.ttl);
+        operation = request.provider.set(request.cacheKey, request.entry, request.ttl);
     } catch (error) {
         logCacheEvent('cache.operation_failed', { ...request.logContext, operation: 'write', error });
         return;
     }
-    logCacheEvent('cache.write_dispatched', { ...request.logContext, entryType: 'error' });
+    logCacheEvent('cache.write_dispatched', { ...request.logContext, entryType: request.entryType });
+    void Promise.resolve(operation).catch((error: unknown) => {
+        logCacheEvent('cache.operation_failed', { ...request.logContext, operation: 'write', error });
+    });
 }
 
 function isErrorCacheEntry<T>(entry: CacheEntry<T>): entry is ErrorCacheEntry {
@@ -215,7 +210,7 @@ function handleBusinessError(request: BusinessErrorRequest): void {
         logCacheEvent('cache.error_cache_failed', { ...logContext, phase: 'encode' });
         return;
     }
-    dispatchCacheErrorWrite({ provider, cacheKey, entry, entryType: 'error', ttl: errorPolicy.ttl, logContext });
+    dispatchCacheWrite({ provider, cacheKey, entry, entryType: 'error', ttl: errorPolicy.ttl, logContext });
 }
 
 /**
@@ -274,15 +269,24 @@ export function Cache(
 
             const promise = (async () => {
                 const provider = resolveCacheProvider(options?.providerName, logContext);
-                let cached: CacheEntry<T> | undefined;
+                if (provider === undefined) {
+                    return (await originalMethod.apply(this, args)) as T;
+                }
+
+                let lookupResult: CacheLookupResult<T>;
                 try {
-                    cached = await provider.get<CacheEntry<T>>(cacheKey);
+                    const entry = await provider.get<CacheEntry<T>>(cacheKey);
+                    lookupResult = entry === undefined ? { type: 'miss', provider } : { type: 'hit', provider, entry };
                 } catch (error) {
                     logCacheEvent('cache.operation_failed', { ...logContext, operation: 'read', error });
-                    throw error;
+                    lookupResult = { type: 'bypass' };
                 }
-                if (cached !== undefined) {
-                    const cachedResult = resolveCachedEntry(cached, errorPolicy, logContext);
+                if (lookupResult.type === 'bypass') {
+                    return (await originalMethod.apply(this, args)) as T;
+                }
+
+                if (lookupResult.type === 'hit') {
+                    const cachedResult = resolveCachedEntry(lookupResult.entry, errorPolicy, logContext);
                     if (cachedResult.type === 'value') {
                         return cachedResult.value;
                     }

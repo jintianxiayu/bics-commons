@@ -350,7 +350,7 @@ describe('异常策略配置边界', () => {
 });
 
 describe('异常策略编排', () => {
-    it('Provider 读取失败不调用异常筛选器、codec 或业务方法', async () => {
+    it('Provider 同步读取失败时旁路缓存并执行业务方法', async () => {
         const provider = createProvider();
         const readError = new Error('redis unavailable');
         provider.get.mockImplementation(() => {
@@ -360,7 +360,8 @@ describe('异常策略编排', () => {
         const shouldCache = jest.fn(() => true);
         const encode = jest.fn((error: unknown): unknown => error);
         const decode = jest.fn((payload: unknown): unknown => payload);
-        const businessMethod = jest.fn();
+        const businessResult = { id: 1 };
+        const businessMethod = jest.fn(() => businessResult);
 
         class UserService {
             @Cache('failed-read-users', {
@@ -372,14 +373,91 @@ describe('异常策略编排', () => {
             }
         }
 
-        await expect(new UserService().getUser()).rejects.toBe(readError);
-        expect(businessMethod).not.toHaveBeenCalled();
+        await expect(new UserService().getUser()).resolves.toBe(businessResult);
+        expect(businessMethod).toHaveBeenCalledTimes(1);
         expect(shouldCache).not.toHaveBeenCalled();
         expect(encode).not.toHaveBeenCalled();
         expect(decode).not.toHaveBeenCalled();
         expect(provider.set).not.toHaveBeenCalled();
     });
+});
 
+describe('Provider 故障旁路', () => {
+    it.each(['missing', 'sync-read', 'async-read'] as const)(
+        'Provider %s 故障旁路时传播原始业务异常且不执行异常策略',
+        async (failureMode) => {
+            const provider = createProvider();
+            const providerError = new Error(`provider ${failureMode}`);
+            if (failureMode === 'sync-read') {
+                provider.get.mockImplementation(() => {
+                    throw providerError;
+                });
+                CacheProviderRegistry.register('failed-provider', provider.provider);
+            } else if (failureMode === 'async-read') {
+                provider.get.mockRejectedValue(providerError);
+                CacheProviderRegistry.register('failed-provider', provider.provider);
+            }
+
+            const businessError = new Error(`business ${failureMode}`);
+            const shouldCache = jest.fn((_error: unknown): boolean => true);
+            const encode = jest.fn((error: unknown): unknown => error);
+            const decode = jest.fn((payload: unknown): unknown => payload);
+            const businessMethod = jest.fn(() => {
+                throw businessError;
+            });
+
+            class UserService {
+                @Cache('failed-provider-users', {
+                    providerName: 'failed-provider',
+                    errorCache: { ttl: 5, shouldCache, codec: { encode, decode } },
+                })
+                getUser(): never {
+                    return businessMethod();
+                }
+            }
+
+            await expect(new UserService().getUser()).rejects.toBe(businessError);
+            expect(businessMethod).toHaveBeenCalledTimes(1);
+            expect(provider.get).toHaveBeenCalledTimes(failureMode === 'missing' ? 0 : 1);
+            expect(provider.set).not.toHaveBeenCalled();
+            expect(shouldCache).not.toHaveBeenCalled();
+            expect(encode).not.toHaveBeenCalled();
+            expect(decode).not.toHaveBeenCalled();
+        }
+    );
+
+    it('Provider 异步读取失败时并发调用复用 pending Promise 且 settled 后清理', async () => {
+        const provider = createProvider();
+        const readFailure = createRejectionDeferred();
+        provider.get.mockReturnValue(readFailure.promise);
+        CacheProviderRegistry.register('pending-failed-read', provider.provider);
+        const businessMethod = jest.fn(() => 23);
+
+        class UserService {
+            @Cache('pending-failed-read-users', { providerName: 'pending-failed-read' })
+            getUser(): number {
+                return businessMethod();
+            }
+        }
+
+        const service = new UserService();
+        const first = service.getUser();
+        const second = service.getUser();
+        expect(second).toBe(first);
+        expect(provider.get).toHaveBeenCalledTimes(1);
+
+        readFailure.reject(new Error('redis read failed'));
+        await expect(Promise.all([first, second])).resolves.toEqual([23, 23]);
+        expect(businessMethod).toHaveBeenCalledTimes(1);
+        expect(provider.set).not.toHaveBeenCalled();
+
+        await expect(service.getUser()).resolves.toBe(23);
+        expect(provider.get).toHaveBeenCalledTimes(2);
+        expect(businessMethod).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('异常策略编排', () => {
     it('key resolver 失败后的业务成功只写入正常结果', async () => {
         const provider = createProvider();
         CacheProviderRegistry.register('key-fallback', provider.provider);
@@ -601,7 +679,7 @@ describe('异常策略编排', () => {
         expect(provider.set).toHaveBeenCalledTimes(1);
     });
 
-    it('正常写入同步失败不进入异常缓存策略', async () => {
+    it('正常写入同步失败不进入异常缓存策略且保留业务结果', async () => {
         const provider = createProvider();
         const writeError = new Error('normal write failed');
         const shouldCache = jest.fn((_error: unknown): boolean => true);
@@ -620,7 +698,7 @@ describe('异常策略编排', () => {
             }
         }
 
-        await expect(new UserService().getUser()).rejects.toBe(writeError);
+        await expect(new UserService().getUser()).resolves.toBe('value');
         expect(provider.set).toHaveBeenCalledTimes(1);
         expect(shouldCache).not.toHaveBeenCalled();
     });

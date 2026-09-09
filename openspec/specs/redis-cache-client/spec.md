@@ -144,12 +144,12 @@
 
 ### Requirement: 命令异常传播且不自动降级
 
-适配器和 `RedisCacheProvider` SHALL 传播客户端命令拒绝的原始错误。Redis 不可用、连接超时、非法 TTL 或扫描失败 MUST NOT 转换为 cache miss、写入成功、删除成功或内存缓存降级；本能力不设置额外超时、离线队列或重连策略。
+适配器和 `RedisCacheProvider` 的直接调用 SHALL 传播客户端命令拒绝的原始错误。Redis 不可用、连接超时、非法 TTL 或扫描失败 MUST NOT 被 Provider 转换为 cache miss、写入成功或删除成功，也 MUST NOT 创建或切换到其他 Redis 或 Memory Provider。`@Cache` 和 `@CacheEvict` SHALL 在装饰器编排边界隔离这些可捕获错误并保留业务结果；本能力不设置额外超时、离线队列、重连或重试策略。
 
 #### Scenario: E01 读取异常不是 cache miss
 
-- **WHEN** GET 命令因 Redis 不可用或连接超时而拒绝
-- **THEN** Provider 以同一错误拒绝，不返回 `undefined`，不执行被缓存业务方法
+- **WHEN** 调用方直接读取 Provider，且 GET 命令因 Redis 不可用或连接超时而拒绝
+- **THEN** Provider 以同一错误拒绝，不返回 `undefined`、不报告 cache miss
 
 #### Scenario: E02 写入异常传播
 
@@ -158,18 +158,30 @@
 
 #### Scenario: E03 删除或清库异常传播
 
-- **WHEN** 精确删除、批量删除或数据库清理命令以错误拒绝
+- **WHEN** 直接调用 Provider 的精确删除、模式删除或数据库清理，且底层命令以错误拒绝
 - **THEN** 对应直接调用以同一错误拒绝，不吞掉错误或继续报告完整清理成功
 
 #### Scenario: E04 非法 TTL 在写入前被拒绝
 
-- **WHEN** 调用方传入 Redis 拒绝的负数、非整数或非有限 TTL
+- **WHEN** 调用方直接传入 Redis Provider 不接受的负数、非整数或非有限 TTL
 - **THEN** Provider 以 `RangeError` 拒绝，不执行 Redis 写入、不替换为默认 TTL、不重试
 
 #### Scenario: E05 真实连接不可用时不创建替代连接
 
-- **WHEN** 已配置有限失败时间的调用方连接关闭或无法连接测试 Redis，调用方执行任一 Provider 操作
+- **WHEN** 已配置有限失败时间的调用方连接关闭或无法连接测试 Redis，调用方直接执行任一 Provider 操作
 - **THEN** 调用在客户端自身失败边界内拒绝，不创建新的 ioredis、node-redis 或内存连接
+
+#### Scenario: E06 @Cache 读取异常旁路 Redis
+
+- **WHEN** `@Cache` 通过 Redis Provider 读取且 GET 命令同步抛出或异步拒绝
+- **THEN** 装饰器不把错误当作正常 miss，也不切换 Provider，而是旁路本次后续缓存操作并执行业务方法一次
+- **AND** 调用方收到业务方法的成功结果或原始业务异常，不收到 Redis 错误
+
+#### Scenario: E07 装饰器写入与删除异常被隔离
+
+- **WHEN** `@Cache` 回填或 `@CacheEvict` 淘汰所触发的 Redis 命令同步抛出或异步拒绝
+- **THEN** 装饰器记录并消费该错误，保留原业务结果或原始业务异常
+- **AND** Redis Provider 的直接调用错误语义、连接所有权和数据协议保持不变
 
 ### Requirement: 跨客户端及旧版本数据互操作
 
@@ -230,11 +242,11 @@
 - **THEN** 装饰器在调用 Redis Provider 写入前跳过异常缓存并传播原业务异常
 - **AND** Redis 客户端不收到部分异常值写入，现有 key 保持不变
 
-#### Scenario: Redis 读取失败仍按基础设施错误传播
+#### Scenario: Redis 读取失败保持 Provider 直接传播与装饰器隔离
 
 - **WHEN** 读取异常条目时 Redis 不可用、连接超时或客户端命令拒绝
-- **THEN** Provider 和装饰器按既有基础设施错误语义拒绝，不尝试 codec、不转换为策略旁路或业务 miss
-- **AND** 不切换客户端、连接或 Memory Provider
+- **THEN** Provider 直接调用以原始错误拒绝；装饰器不尝试 codec、不把故障记录为正常业务 miss，并旁路本次后续缓存操作
+- **AND** 装饰器不切换客户端、连接或 Memory Provider，执行业务方法一次并保留业务结果或原始业务异常
 
 ### Requirement: 调用方拥有连接生命周期
 

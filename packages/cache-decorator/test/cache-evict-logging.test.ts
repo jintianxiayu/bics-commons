@@ -244,7 +244,7 @@ it('cache-operation-logging/E04 重复淘汰每次只执行一次实际删除和
     expect(events(mockLogger.debug)).toEqual(['cache.evict_dispatched', 'cache.evict_dispatched']);
 });
 
-it('cache-operation-logging/F03 allEntries 删除失败记录同一错误且不报告 completed', async () => {
+it('cache-operation-logging/F03 allEntries 删除失败记录同一错误且保留业务结果', async () => {
     const evictionError = new Error('redis scan failed');
     const provider = createProvider();
     provider.deleteByPattern.mockRejectedValue(evictionError);
@@ -257,7 +257,7 @@ it('cache-operation-logging/F03 allEntries 删除失败记录同一错误且不�
         }
     }
 
-    await expect(new UserService().clearUsers()).rejects.toBe(evictionError);
+    await expect(new UserService().clearUsers()).resolves.toBe(true);
     expect(provider.deleteByPattern).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).not.toContain('cache.evict_completed');
     expect(loggedMetadata(mockLogger.error)).toEqual([
@@ -272,13 +272,39 @@ it('cache-operation-logging/F03 allEntries 删除失败记录同一错误且不�
     ]);
 });
 
-it('cache-operation-logging/F05 异步单 key 删除拒绝不会被等待或消费', async () => {
+it('cache-operation-logging/F03 allEntries 同步删除失败保留业务结果且不报告 completed', async () => {
+    const evictionError = new Error('synchronous scan failed');
+    const provider = createProvider();
+    provider.deleteByPattern.mockImplementation(() => {
+        throw evictionError;
+    });
+    CacheProviderRegistry.register('sync-failed-all-provider', provider.provider);
+
+    class UserService {
+        @CacheEvict('sync-failed-all-users', { providerName: 'sync-failed-all-provider', allEntries: true })
+        clearUsers(): string {
+            return 'business-result';
+        }
+    }
+
+    await expect(new UserService().clearUsers()).resolves.toBe('business-result');
+    expect(events(mockLogger.debug)).not.toContain('cache.evict_completed');
+    expect(loggedMetadata(mockLogger.error)).toContainEqual({
+        event: 'cache.operation_failed',
+        cacheName: 'sync-failed-all-users',
+        methodName: 'clearUsers',
+        providerName: 'sync-failed-all-provider',
+        operation: 'evict',
+        error: evictionError,
+    });
+});
+
+it('cache-operation-logging/F05 异步单 key 删除拒绝被观察但不改变业务结果', async () => {
     let rejectEviction: ((reason?: unknown) => void) | undefined;
     const evictionError = new Error('async delete failed');
     const evictionPromise = new Promise<void>((_resolve, reject) => {
         rejectEviction = reject;
     });
-    const observedEvictionFailure = evictionPromise.catch((error: unknown) => error);
     const thenSpy = jest.spyOn(evictionPromise, 'then');
     const provider = createProvider();
     provider.delete.mockReturnValue(evictionPromise);
@@ -293,7 +319,7 @@ it('cache-operation-logging/F05 异步单 key 删除拒绝不会被等待或消�
 
     await expect(new UserService().deleteUser()).resolves.toBe(15);
     expect(provider.delete).toHaveBeenCalledTimes(1);
-    expect(thenSpy).not.toHaveBeenCalled();
+    expect(thenSpy).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).toEqual(['cache.evict_dispatched']);
     expect(events(mockLogger.debug)).not.toContain('cache.evict_completed');
 
@@ -301,25 +327,35 @@ it('cache-operation-logging/F05 异步单 key 删除拒绝不会被等待或消�
         throw new Error('Eviction rejecter was not initialized');
     }
     rejectEviction(evictionError);
-    await expect(observedEvictionFailure).resolves.toBe(evictionError);
+    await Promise.resolve();
+    expect(loggedMetadata(mockLogger.error)).toContainEqual({
+        event: 'cache.operation_failed',
+        cacheName: 'async-delete-users',
+        methodName: 'deleteUser',
+        providerName: 'async-delete-provider',
+        operation: 'evict',
+        error: evictionError,
+    });
 });
 
-it('淘汰 Provider 解析失败记录 provider_resolution 且不删除', async () => {
+it('淘汰 Provider 解析失败记录 provider_resolution 且保留业务结果', async () => {
     const registryError = new Error('evict provider missing');
     jest.spyOn(CacheProviderRegistry, 'get').mockImplementation(() => {
         throw registryError;
     });
     const businessMethod = jest.fn(() => 'updated');
+    const resolver = jest.fn(() => 'unused-key');
 
     class UserService {
-        @CacheEvict('missing-evict-users', { providerName: 'missing-evict-provider' })
+        @CacheEvict('missing-evict-users', { providerName: 'missing-evict-provider', key: resolver })
         updateUser(): string {
             return businessMethod();
         }
     }
 
-    await expect(new UserService().updateUser()).rejects.toBe(registryError);
+    await expect(new UserService().updateUser()).resolves.toBe('updated');
     expect(businessMethod).toHaveBeenCalledTimes(1);
+    expect(resolver).not.toHaveBeenCalled();
     expect(loggedMetadata(mockLogger.error)).toEqual([
         {
             event: 'cache.operation_failed',
@@ -333,7 +369,7 @@ it('淘汰 Provider 解析失败记录 provider_resolution 且不删除', async 
     expect(mockLogger.debug).not.toHaveBeenCalled();
 });
 
-it('同步单 key 删除失败记录 evict operation 且传播同一错误', async () => {
+it('同步单 key 删除失败记录 evict operation 且保留业务结果', async () => {
     const evictionError = new Error('synchronous delete failed');
     const provider = createProvider();
     provider.delete.mockImplementation(() => {
@@ -348,7 +384,7 @@ it('同步单 key 删除失败记录 evict operation 且传播同一错误', asy
         }
     }
 
-    await expect(new UserService().deleteUser(16)).rejects.toBe(evictionError);
+    await expect(new UserService().deleteUser(16)).resolves.toBe(16);
     expect(provider.delete).toHaveBeenCalledTimes(1);
     expect(events(mockLogger.debug)).not.toContain('cache.evict_dispatched');
     expect(loggedMetadata(mockLogger.error)).toContainEqual({

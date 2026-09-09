@@ -78,7 +78,7 @@ async function main() {
 
     class FailureService {
         getUser() {
-            throw new Error('business method must not run');
+            return { id: 18, source: 'business-bypass' };
         }
     }
     decorateMethod(FailureService.prototype, 'getUser', Cache('fixture-failure-users', { providerName: 'failing' }));
@@ -91,10 +91,10 @@ async function main() {
         );
         assert.deepEqual(result, { id: 17, password: 'business-value-secret' });
 
-        const failure = LoggerContext.withContext({ traceId: 'cache-fixture-trace' }, () =>
+        const bypassResult = await LoggerContext.withContext({ traceId: 'cache-fixture-trace' }, () =>
             new FailureService().getUser()
         );
-        await assert.rejects(failure, (error) => error === providerError);
+        assert.deepEqual(bypassResult, { id: 18, source: 'business-bypass' });
         assert.strictEqual(LoggerFactory.getLogger(CACHE_LOGGER_NAME), namedLogger);
     } finally {
         CacheProviderRegistry.clear();

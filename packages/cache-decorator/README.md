@@ -118,8 +118,8 @@ class UserService {
 - `errorCache` 省略时，业务异常不会持久化；相同 key 的执行中调用仍会复用同一个 pending Promise。
 - `errorCache.ttl` 必须是大于零的有限整数秒，不能继承正常结果的 `ttl`。非法值会在 legacy decorator 求值时抛出 `RangeError`。
 - `shouldCache` 省略时会接受所有业务异常；返回 `false` 或自身抛错时按 fail-closed 跳过写入，并继续抛出原业务异常。
-- Provider 解析/读取、key resolver、Logger 和 codec 的故障不会作为业务异常缓存。
-- 异常写入沿用 fire-and-forget 边界；同步可观察的 Provider 写入失败不会替换已经发生的业务异常。
+- Provider 解析或读取失败会旁路本次全部缓存操作，既不会作为业务异常缓存，也不会阻断业务方法。
+- 异常写入沿用 fire-and-forget 边界；Provider 同步抛错或异步拒绝都不会替换已经发生的业务异常。
 
 默认 codec 会把标准 `Error` 保存为只包含 `name` 和 `message` 的 JSON payload。缓存命中会创建新的 `Error`，不保留原对象身份、`stack`、自定义原型或任意自有属性。非 `Error` 抛出值必须能安全 JSON 往返；`undefined`、函数、symbol、循环引用和非有限数会跳过写入。
 
@@ -190,13 +190,19 @@ Logger。
 | `error` | `cache.operation_failed`    | Provider 解析或可观察的读取、写入、淘汰操作失败        |
 
 `write_dispatched` 和 `evict_dispatched` 只描述调用已发起。为保持既有时序，decorator 不等待 `set()` 或单 key
-`delete()` 返回的 Promise，也不为日志附加 rejection handler；异步失败不会被描述为成功或完成。只有本来就会等待的全量淘汰可记录
-`evict_completed`。
+`delete()` 返回的 Promise，但会消费其 rejection 并记录 `cache.operation_failed`，避免形成未处理的 Promise rejection。只有本来就会
+等待的全量淘汰可记录 `evict_completed`；全量淘汰失败不会记录 completed，也不会替换业务结果。
 
 每条日志只包含 `event`、`cacheName`、`methodName`、`providerName`，并按事件增加 `entryType`、`scope`、
 `reason`、`phase`、`operation` 或基础设施 `error`。日志不会包含方法参数、业务返回值、缓存值、业务异常内容、codec
 payload、策略回调错误或完整逻辑/物理 cache key，也不会为日志额外序列化这些值。Provider 错误和现有
-`LoggerContext` 的 `traceId` 继续由 Logger 统一规范化、脱敏和关联；cache 包不直接读写 LoggerContext。Logger 自身同步失败会被隔离，不会替换缓存结果、业务结果或原始 Provider 错误。
+`LoggerContext` 的 `traceId` 继续由 Logger 统一规范化、脱敏和关联；cache 包不直接读写 LoggerContext。Logger 自身同步失败会被隔离，不会改变缓存命中结果或 Provider 故障后的业务旁路结果。
+
+## Provider 故障语义
+
+`@Cache` 与 `@CacheEvict` 固定采用 fail-open：Provider 不存在，或缓存读取、写入、单 key 删除、全量删除同步抛错或异步拒绝时，装饰器记录 `cache.operation_failed`，但仍向调用方返回业务成功结果或传播原始业务异常。读取失败不会记录为正常 miss，也不会在本次调用中写入正常或异常条目；淘汰失败不会记录为 completed。该行为没有配置开关。
+
+fail-open 只存在于装饰器编排边界。直接调用 `CacheProvider`、`RedisCacheProvider` 或 Redis adapter 时，原始异常仍会正常抛出或拒绝，便于基础设施代码显式处理。装饰器不会自动重试、设置超时、切换到 Memory 或其他 Provider，也不负责 Memory 容量、淘汰策略或进程内存治理。
 
 ## Redis
 

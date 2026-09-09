@@ -46,37 +46,42 @@ function resolveCacheKey(
 }
 
 /**
- * 获取淘汰操作使用的 Provider，并在解析失败时记录原始注册表错误。
+ * 获取淘汰操作使用的 Provider，并把解析失败转换为缓存旁路。
  * @param providerName decorator 配置中的 Provider 名称。
  * @param logContext 当前方法的稳定日志上下文。
- * @returns 已注册的缓存 Provider。
- * @throws Provider 注册表抛出的原始错误。
+ * @returns 已注册的缓存 Provider；解析失败时返回 undefined。
  */
-function resolveCacheProvider(providerName: string | undefined, logContext: CacheLogContext): CacheProvider {
+function resolveCacheProvider(
+    providerName: string | undefined,
+    logContext: CacheLogContext
+): CacheProvider | undefined {
     try {
         return CacheProviderRegistry.get(providerName);
     } catch (error) {
         logCacheEvent('cache.operation_failed', { ...logContext, operation: 'provider_resolution', error });
-        throw error;
+        return undefined;
     }
 }
 
 /**
- * 保持 fire-and-forget 语义发起单 key 删除，只处理调用当下可观察的同步失败。
+ * 保持 fire-and-forget 语义发起单 key 删除，并消费同步或异步 Provider 失败。
  * @param provider 当前淘汰使用的 Provider。
  * @param cacheKey 待删除的完整 key；不会进入日志元数据。
  * @param logContext 当前方法的稳定日志上下文。
- * @returns 无返回值；异步删除 Promise 不会被等待或消费。
- * @throws Provider delete 同步抛出的原始错误。
+ * @returns 无返回值；删除失败仅记录日志，不影响业务结果。
  */
 function dispatchCacheDelete(provider: CacheProvider, cacheKey: string, logContext: CacheLogContext): void {
+    let operation: void | Promise<void>;
     try {
-        provider.delete(cacheKey);
+        operation = provider.delete(cacheKey);
     } catch (error) {
         logCacheEvent('cache.operation_failed', { ...logContext, operation: 'evict', error });
-        throw error;
+        return;
     }
     logCacheEvent('cache.evict_dispatched', { ...logContext, scope: 'key' });
+    void Promise.resolve(operation).catch((error: unknown) => {
+        logCacheEvent('cache.operation_failed', { ...logContext, operation: 'evict', error });
+    });
 }
 
 /**
@@ -107,13 +112,16 @@ export function CacheEvict(
             }
 
             const provider = resolveCacheProvider(options?.providerName, logContext);
+            if (provider === undefined) {
+                return result;
+            }
 
             if (options?.allEntries) {
                 try {
                     await provider.deleteByPattern(cacheName + '*');
                 } catch (error) {
                     logCacheEvent('cache.operation_failed', { ...logContext, operation: 'evict', error });
-                    throw error;
+                    return result;
                 }
                 logCacheEvent('cache.evict_completed', { ...logContext, scope: 'allEntries' });
             } else {
