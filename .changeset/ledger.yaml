@@ -6,6 +6,10 @@
   dir: packages/cache-decorator
   intents:
     - cozy-bats-move
+"@jintianxiayu/cache-decorator@1.0.2":
+  dir: packages/cache-decorator
+  intents:
+    - quiet-caches-flow
 "@jintianxiayu/http-client-decorator@1.0.0":
   dir: packages/http-client-decorator
   intents:
