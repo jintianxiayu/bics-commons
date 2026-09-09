@@ -2,6 +2,10 @@
   dir: packages/cache-decorator
   intents:
     - gentle-heads-look
+"@jintianxiayu/cache-decorator@1.0.1":
+  dir: packages/cache-decorator
+  intents:
+    - cozy-bats-move
 "@jintianxiayu/http-client-decorator@1.0.0":
   dir: packages/http-client-decorator
   intents:
