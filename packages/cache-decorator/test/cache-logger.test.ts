@@ -80,6 +80,7 @@ it('cache-operation-logging/正常缓存决策使用 debug', () => {
         'cache.hit',
         'cache.miss',
         'cache.write_dispatched',
+        'cache.error_cache_skipped',
         'cache.evict_dispatched',
         'cache.evict_completed',
     ] as const;
@@ -99,11 +100,13 @@ it('cache-operation-logging/可恢复回退与淘汰跳过使用 warn', () => {
     const { cacheLogger, logger } = loadCacheLogger();
 
     cacheLogger.logCacheEvent('cache.key_fallback', { ...logContext, reason: 'resolver_error' });
+    cacheLogger.logCacheEvent('cache.error_cache_failed', { ...logContext, phase: 'encode' });
     cacheLogger.logCacheEvent('cache.evict_skipped', { ...logContext, reason: 'business_error' });
 
-    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledTimes(3);
     expect(logger.warn.mock.calls.map((call) => (call[1] as { event: string }).event)).toEqual([
         'cache.key_fallback',
+        'cache.error_cache_failed',
         'cache.evict_skipped',
     ]);
     expect(logger.debug).not.toHaveBeenCalled();

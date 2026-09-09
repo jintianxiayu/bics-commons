@@ -1,8 +1,4 @@
-## Purpose
-
-定义 `@Cache` 与 `@CacheEvict` 在关键缓存决策节点通过统一命名 Logger 输出结构化日志的行为，使依赖方能够区分命中、未命中、请求合并、回填、淘汰与基础设施失败，同时不改变缓存调用的既有结果和时序。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 固定命名 Logger 与日志级别
 
@@ -90,90 +86,6 @@
 - **THEN** 首次调用记录一次 `cache.miss` 和一次 `cache.write_dispatched`，后续每次实际可用 Provider 命中各记录一次 `cache.hit`
 - **AND** 日志功能不增加额外读取、重复写入或业务方法调用
 
-### Requirement: @CacheEvict 淘汰决策日志
-
-`@CacheEvict` SHALL 在业务方法成功后记录实际选择的淘汰范围，并在业务方法失败时明确记录淘汰被跳过。系统 MUST 区分单 key 淘汰已发起与 `allEntries` 淘汰已完成，不得在业务方法失败或淘汰失败后报告完成。
-
-#### Scenario: E01 单 key 淘汰已发起
-
-- **WHEN** 被装饰业务方法成功且 `allEntries` 未启用，Provider 的单 key 删除调用已返回控制权
-- **THEN** 系统提交 `debug` 日志且 `event` 为 `cache.evict_dispatched`、`scope` 为 `key`
-- **AND** 返回原业务结果，不把未等待的删除描述为已完成
-
-#### Scenario: E02 allEntries 淘汰完成
-
-- **WHEN** 被装饰业务方法成功且 `allEntries: true`，Provider 的 `deleteByPattern` 正常完成
-- **THEN** 系统提交 `debug` 日志且 `event` 为 `cache.evict_completed`、`scope` 为 `allEntries`
-- **AND** 返回原业务结果
-
-#### Scenario: E03 业务方法失败时跳过淘汰
-
-- **WHEN** `@CacheEvict` 装饰的业务方法以异常拒绝
-- **THEN** 系统在重新抛出同一异常前提交 `warn` 日志且 `event` 为 `cache.evict_skipped`、`reason` 为 `business_error`
-- **AND** 不解析 Provider、不生成淘汰 key，也不执行单 key 或全量淘汰
-
-#### Scenario: E04 重复淘汰保持原幂等语义
-
-- **WHEN** 同一淘汰方法被重复调用且底层 Provider 将重复删除视为成功
-- **THEN** 每次调用分别记录与实际范围一致的 `cache.evict_dispatched` 或 `cache.evict_completed`
-- **AND** 日志功能不增加额外删除、不创建 key，也不改变底层 Provider 的幂等性
-
-### Requirement: key resolver 回退日志
-
-当 `@Cache` 或单 key `@CacheEvict` 的自定义 key resolver 抛出异常时，系统 SHALL 在沿用现有默认 key 回退行为的同时提交 `warn` 日志，且 MUST NOT 因日志功能改变 resolver 的调用次数、回退结果或异常隔离语义。`allEntries: true` 继续忽略 key 选项，不调用 resolver，也不产生 key 回退日志。
-
-#### Scenario: K01 @Cache key resolver 失败后回退
-
-- **WHEN** `@Cache` 的自定义 key resolver 抛出异常
-- **THEN** 系统提交 `warn` 日志且 `event` 为 `cache.key_fallback`
-- **AND** 使用 `KeyBuilder.build(cacheName, args)` 的既有结果继续缓存流程
-
-#### Scenario: K02 单 key 淘汰 resolver 失败后回退
-
-- **WHEN** 单 key `@CacheEvict` 的业务方法成功但自定义 key resolver 抛出异常
-- **THEN** 系统提交 `warn` 日志且 `event` 为 `cache.key_fallback`
-- **AND** 使用默认 key 发起一次删除
-
-#### Scenario: K03 allEntries 不求值 key resolver
-
-- **WHEN** `@CacheEvict` 配置 `allEntries: true` 且同时提供会抛出异常的 key resolver
-- **THEN** 系统不调用该 resolver、不提交 `cache.key_fallback`
-- **AND** 仍按缓存名称前缀执行全量淘汰
-
-### Requirement: 缓存失败与正常 miss 明确区分
-
-系统 SHALL 为缓存基础设施失败提交 `cache.operation_failed` 事件，并以 `operation` 标识失败阶段。读取失败、Provider 解析失败和已等待的淘汰失败 MUST NOT 被记录为正常 miss、命中、写入或淘汰完成；Redis 不可用、连接超时和扫描或批量删除失败 MUST NOT 触发内存 Provider 或其他 Provider 降级。
-
-#### Scenario: F01 默认或指定 Provider 不存在
-
-- **WHEN** 装饰器无法从注册表取得默认或指定 Provider
-- **THEN** 系统提交 `error` 日志且 `event` 为 `cache.operation_failed`、`operation` 为 `provider_resolution`
-- **AND** 以原始注册表错误拒绝，不执行缓存读写或替代 Provider 操作
-
-#### Scenario: F02 Redis 读取不可用或超时
-
-- **WHEN** Provider 读取因 Redis 不可用或连接超时而拒绝
-- **THEN** 系统提交 `error` 日志且 `event` 为 `cache.operation_failed`、`operation` 为 `read`
-- **AND** 不提交 `cache.miss`，不执行业务方法，不切换 Provider，并以同一错误拒绝
-
-#### Scenario: F03 allEntries 扫描或删除失败
-
-- **WHEN** `deleteByPattern` 因任一 SCAN 页面或批量删除失败而拒绝
-- **THEN** 系统提交 `error` 日志且 `event` 为 `cache.operation_failed`、`operation` 为 `evict`
-- **AND** 不提交 `cache.evict_completed`，以同一错误拒绝且不报告完整清理成功
-
-#### Scenario: F04 非等待写入只报告已发起
-
-- **WHEN** `@Cache` 调用返回 Promise 的 Provider `set`，包括该 Promise 随后因 Redis 写入、非法 TTL 或序列化错误而拒绝的情况
-- **THEN** 装饰器只保证在同步调用返回控制权后提交 `cache.write_dispatched`
-- **AND** 不提交写入完成或写入成功事件，不为获得日志而等待该 Promise、重试或切换 Provider
-
-#### Scenario: F05 非等待单 key 删除只报告已发起
-
-- **WHEN** 单 key `@CacheEvict` 调用返回 Promise 的 Provider `delete`
-- **THEN** 装饰器只保证在同步调用返回控制权后提交 `cache.evict_dispatched`
-- **AND** 不提交删除完成或删除成功事件，不为获得日志而等待该 Promise、重试或切换 Provider
-
 ### Requirement: 结构化上下文与敏感信息边界
 
 每条缓存日志 SHALL 至少包含稳定的 `event`、`cacheName`、`methodName` 和 `providerName` 元数据，其中未显式指定 Provider 时 `providerName` 使用稳定的 `default` 标识。事件 MAY 按场景增加 `entryType`、`scope`、`reason`、`phase`、`operation` 或基础设施 `error`；系统 MUST NOT 将方法参数、业务返回值、缓存值、异常缓存中的业务异常内容、错误 codec payload、异常策略回调错误或完整逻辑及物理 cache key 放入缓存日志。Logger 上下文中已有的 `traceId` SHALL 继续由 `@jintianxiayu/logger` 的既有机制关联和脱敏。
@@ -208,33 +120,6 @@
 - **THEN** `cache.error_cache_failed` 只记录稳定 `phase`，不附加回调异常或原业务异常
 - **AND** Logger 的任何故障仍不改变缓存旁路和原错误传播结果
 
-### Requirement: Logger 生命周期与故障隔离
-
-缓存包 MUST NOT 在模块加载时获取命名 Logger，也 MUST NOT 主动调用 `LoggerFactory.init()`、`LoggerFactory.shutdown()`、安装进程信号处理器或持有独立 Logger 运行时。应用负责在首次缓存调用前初始化 Logger，并在退出时统一关闭。获取或写入 Logger 的同步异常 MUST NOT 替换缓存结果、业务结果或原始缓存异常。
-
-#### Scenario: L01 导入缓存包不初始化 Logger
-
-- **WHEN** 应用仅导入 `@jintianxiayu/cache-decorator` 而尚未调用任何装饰方法
-- **THEN** 缓存包不调用 `LoggerFactory.getLogger()`、`init()` 或 `shutdown()`
-
-#### Scenario: L02 首次缓存调用使用应用 Logger
-
-- **WHEN** 应用先完成 `LoggerFactory.init()` 再调用任一缓存装饰方法
-- **THEN** 缓存包通过 `LoggerFactory.getLogger('@jintianxiayu/cache-decorator')` 取得共享命名 Logger
-- **AND** 不创建第二个 LoggerFactory 或 Winston 实例
-
-#### Scenario: L03 Logger 写入失败不影响 cache hit
-
-- **WHEN** 命名 Logger 在记录 cache hit 时同步抛出异常
-- **THEN** 装饰器仍返回原缓存值且不执行业务方法
-- **AND** Logger 异常不替换缓存结果
-
-#### Scenario: L04 Logger 写入失败不遮蔽 Provider 错误
-
-- **WHEN** Provider 读取失败且命名 Logger 的 `error` 写入也同步抛出异常
-- **THEN** 装饰器仍以原始 Provider 错误拒绝
-- **AND** Logger 异常不转换为 miss、不触发业务方法或 Provider 降级
-
 ### Requirement: 公共 API 与缓存语义保持兼容
 
 除本变更明确新增的异常缓存策略与默认异常持久化行为外，`CacheOptions` SHALL 继续包含可选的 `ttl`、`providerName` 和 `key`，并新增可选的 `errorCache`；包根 SHALL 导出异常策略与 codec 公共类型。`CacheEvictOptions` MUST 继续只包含可选的 `key`、`allEntries` 和 `providerName`；`@Cache`、`@CacheEvict`、`CacheProvider` 与 `CacheProviderRegistry` 的其余公共签名和包根导出 MUST 保持不变。key、正常 TTL、pending Promise 身份、Provider 选择、业务调用顺序及现有等待边界 SHALL 保持不变。
@@ -262,19 +147,3 @@
 - **WHEN** 应用继续使用 Memory、Redis 或自定义 `CacheProvider`，并提供既有 Logger peer
 - **THEN** Provider 方法签名、注册方式、连接所有权、Logger peerDependency 和运行时依赖保持不变
 - **AND** 本变更不要求 Provider 或第三方客户端新增异常专用方法
-
-### Requirement: Logger peer 依赖契约
-
-发布的 `@jintianxiayu/cache-decorator` SHALL 将兼容的 `@jintianxiayu/logger` 声明为必需 peerDependency，并在仓库开发环境以 workspace devDependency 使用同一 Logger 包。缓存包的公共 `.d.ts` MUST NOT 因内部日志实现暴露 Logger 私有实现类型；Logger 包源码和公共 API MUST NOT 因本能力发生变化。
-
-#### Scenario: P01 消费项目提供兼容 Logger
-
-- **WHEN** workspace 外的严格 TypeScript 消费项目安装缓存包、兼容版本的 `@jintianxiayu/logger` 和 `reflect-metadata`
-- **THEN** 包根入口能够导入，既有 Memory、Redis 和自定义 Provider 用法能够编译并运行
-- **AND** 缓存日志与应用使用同一 Logger 配置和 LoggerContext
-
-#### Scenario: P02 发布清单包含 Logger peer
-
-- **WHEN** 对缓存包执行发布 dry-run 并检查生成的 package manifest
-- **THEN** manifest 包含实际 semver 形式的必需 `@jintianxiayu/logger` peerDependency
-- **AND** 不把 workspace 协议原样发布，不把 Logger 声明为缓存包私有的普通 dependency

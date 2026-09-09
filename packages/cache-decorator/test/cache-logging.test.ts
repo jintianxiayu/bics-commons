@@ -23,6 +23,7 @@ interface CacheLogMetadata {
     readonly providerName: string;
     readonly entryType?: string;
     readonly reason?: string;
+    readonly phase?: string;
     readonly operation?: string;
     readonly error?: unknown;
 }
@@ -80,6 +81,17 @@ function loggedMetadata(method: jest.Mock): CacheLogMetadata[] {
 
 function events(method: jest.Mock): string[] {
     return loggedMetadata(method).map(({ event }) => event);
+}
+
+/** 使用公开协议形状构造当前版本异常条目，避免日志测试依赖内部 helper。 */
+function currentErrorEntry(payload: unknown): unknown {
+    return {
+        error: {
+            kind: '@jintianxiayu/cache-decorator/error',
+            version: 1,
+            payload,
+        },
+    };
 }
 
 beforeEach(() => {
@@ -146,20 +158,24 @@ it('cache-operation-logging/C02 命中 value entry 时记录 hit 并跳过业务
     });
 });
 
-it('cache-operation-logging/C03 命中 error entry 时记录 hit 并抛出同一异常', async () => {
-    const cachedError = new Error('cached business failure');
-    const provider = createProvider({ error: cachedError });
+it('cache-operation-logging/C03 命中可解码的版本化 error entry 时记录 hit', async () => {
+    const provider = createProvider(
+        currentErrorEntry({ type: 'error', name: 'CachedError', message: 'cached business failure' })
+    );
     CacheProviderRegistry.register('error-entry-provider', provider.provider);
     const businessMethod = jest.fn();
 
     class UserService {
-        @Cache('error-users', { providerName: 'error-entry-provider' })
+        @Cache('error-users', { providerName: 'error-entry-provider', errorCache: { ttl: 5 } })
         getUser(): unknown {
             return businessMethod();
         }
     }
 
-    await expect(new UserService().getUser()).rejects.toBe(cachedError);
+    await expect(new UserService().getUser()).rejects.toMatchObject({
+        name: 'CachedError',
+        message: 'cached business failure',
+    });
     expect(businessMethod).not.toHaveBeenCalled();
     expect(loggedMetadata(mockLogger.debug)).toContainEqual({
         event: 'cache.hit',
@@ -238,7 +254,7 @@ it('cache-operation-logging/C05 业务异常回填 error entry 后抛出同一�
     });
 
     class UserService {
-        @Cache('write-error-users', { providerName: 'write-error-provider' })
+        @Cache('write-error-users', { providerName: 'write-error-provider', errorCache: { ttl: 7 } })
         getUser(): never {
             return businessMethod();
         }
@@ -247,7 +263,11 @@ it('cache-operation-logging/C05 业务异常回填 error entry 后抛出同一�
     await expect(new UserService().getUser()).rejects.toBe(businessError);
     expect(provider.get).toHaveBeenCalledTimes(1);
     expect(businessMethod).toHaveBeenCalledTimes(1);
-    expect(provider.set).toHaveBeenCalledWith(expect.any(String), { error: businessError }, undefined);
+    expect(provider.set).toHaveBeenCalledWith(
+        expect.any(String),
+        currentErrorEntry({ type: 'error', name: 'Error', message: 'business failed' }),
+        7
+    );
     expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.write_dispatched']);
     expect(loggedMetadata(mockLogger.debug)[1]).toEqual({
         event: 'cache.write_dispatched',
@@ -512,24 +532,28 @@ it('cache-operation-logging/L04 Logger error 失败不遮蔽原始读取异常',
     expect(events(mockLogger.debug)).not.toContain('cache.miss');
 });
 
-it('同步 set 失败记录 write operation 并保持既有错误回填控制流', async () => {
+it('正常结果同步 set 失败只记录一次 write operation 且不进入异常策略', async () => {
     const writeError = new Error('synchronous write failed');
     const provider = createProvider(undefined);
+    const shouldCache = jest.fn((_error: unknown): boolean => true);
     provider.set.mockImplementationOnce(() => {
         throw writeError;
     });
     CacheProviderRegistry.register('sync-write-provider', provider.provider);
 
     class UserService {
-        @Cache('sync-write-users', { providerName: 'sync-write-provider' })
+        @Cache('sync-write-users', {
+            providerName: 'sync-write-provider',
+            errorCache: { ttl: 5, shouldCache },
+        })
         getUser(): number {
             return 12;
         }
     }
 
     await expect(new UserService().getUser()).rejects.toBe(writeError);
-    expect(provider.set).toHaveBeenCalledTimes(2);
-    expect(provider.set.mock.calls[1]?.[1]).toEqual({ error: writeError });
+    expect(provider.set).toHaveBeenCalledTimes(1);
+    expect(shouldCache).not.toHaveBeenCalled();
     expect(loggedMetadata(mockLogger.error)).toContainEqual({
         event: 'cache.operation_failed',
         cacheName: 'sync-write-users',
@@ -538,7 +562,291 @@ it('同步 set 失败记录 write operation 并保持既有错误回填控制流
         operation: 'write',
         error: writeError,
     });
-    expect(loggedMetadata(mockLogger.debug)).toContainEqual(
-        expect.objectContaining({ event: 'cache.write_dispatched', entryType: 'error' })
-    );
+    expect(events(mockLogger.debug)).not.toContain('cache.write_dispatched');
+});
+
+it('cache-operation-logging/按配置跳过异常缓存：disabled 记录 debug 且不写入', async () => {
+    const provider = createProvider(undefined);
+    CacheProviderRegistry.register('disabled-error-cache', provider.provider);
+    const businessError = new Error('transient business failure');
+
+    class UserService {
+        @Cache('disabled-error-users', { providerName: 'disabled-error-cache' })
+        async getUser(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(loggedMetadata(mockLogger.debug)).toEqual([
+        {
+            event: 'cache.miss',
+            cacheName: 'disabled-error-users',
+            methodName: 'getUser',
+            providerName: 'disabled-error-cache',
+        },
+        {
+            event: 'cache.error_cache_skipped',
+            cacheName: 'disabled-error-users',
+            methodName: 'getUser',
+            providerName: 'disabled-error-cache',
+            reason: 'disabled',
+        },
+    ]);
+    expect(provider.set).not.toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+});
+
+it('cache-operation-logging/按配置跳过异常缓存：predicate_rejected 不记录 write', async () => {
+    const provider = createProvider(undefined);
+    CacheProviderRegistry.register('predicate-rejected', provider.provider);
+    const businessError = new Error('rate limited');
+    const shouldCache = jest.fn((_error: unknown): boolean => false);
+
+    class UserService {
+        @Cache('predicate-rejected-users', {
+            providerName: 'predicate-rejected',
+            errorCache: { ttl: 5, shouldCache },
+        })
+        async getUser(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.error_cache_skipped']);
+    expect(loggedMetadata(mockLogger.debug)[1]).toEqual({
+        event: 'cache.error_cache_skipped',
+        cacheName: 'predicate-rejected-users',
+        methodName: 'getUser',
+        providerName: 'predicate-rejected',
+        reason: 'predicate_rejected',
+    });
+    expect(shouldCache).toHaveBeenCalledTimes(1);
+    expect(provider.set).not.toHaveBeenCalled();
+});
+
+it('cache-operation-logging/C07 legacy_entry 旁路后记录 miss 并回填正常值', async () => {
+    const provider = createProvider({ error: { message: 'legacy payload' } });
+    CacheProviderRegistry.register('legacy-entry', provider.provider);
+    const businessMethod = jest.fn(() => 'fresh');
+
+    class UserService {
+        @Cache('legacy-entry-users', { providerName: 'legacy-entry', errorCache: { ttl: 5 } })
+        async getUser(): Promise<string> {
+            return businessMethod();
+        }
+    }
+
+    await expect(new UserService().getUser()).resolves.toBe('fresh');
+    expect(events(mockLogger.debug)).toEqual(['cache.error_cache_skipped', 'cache.miss', 'cache.write_dispatched']);
+    expect(loggedMetadata(mockLogger.debug)[0]).toEqual({
+        event: 'cache.error_cache_skipped',
+        cacheName: 'legacy-entry-users',
+        methodName: 'getUser',
+        providerName: 'legacy-entry',
+        reason: 'legacy_entry',
+    });
+    expect(events(mockLogger.debug)).not.toContain('cache.hit');
+    expect(businessMethod).toHaveBeenCalledTimes(1);
+});
+
+it('cache-operation-logging/C07 disabled_entry 旁路后记录 miss 且不解码', async () => {
+    const provider = createProvider(currentErrorEntry({ type: 'error', name: 'Error', message: 'cached' }));
+    CacheProviderRegistry.register('disabled-entry', provider.provider);
+    const businessMethod = jest.fn(() => 'fresh');
+
+    class UserService {
+        @Cache('disabled-entry-users', { providerName: 'disabled-entry' })
+        async getUser(): Promise<string> {
+            return businessMethod();
+        }
+    }
+
+    await expect(new UserService().getUser()).resolves.toBe('fresh');
+    expect(events(mockLogger.debug)).toEqual(['cache.error_cache_skipped', 'cache.miss', 'cache.write_dispatched']);
+    expect(loggedMetadata(mockLogger.debug)[0]).toEqual({
+        event: 'cache.error_cache_skipped',
+        cacheName: 'disabled-entry-users',
+        methodName: 'getUser',
+        providerName: 'disabled-entry',
+        reason: 'disabled_entry',
+    });
+    expect(events(mockLogger.debug)).not.toContain('cache.hit');
+    expect(businessMethod).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+    [
+        'predicate',
+        (): boolean => {
+            throw new Error('predicate failed');
+        },
+        {
+            encode: jest.fn((error: unknown): unknown => error),
+            decode: jest.fn((payload: unknown): unknown => payload),
+        },
+    ],
+    [
+        'encode',
+        (): boolean => true,
+        {
+            encode: jest.fn((): never => {
+                throw new Error('encode failed');
+            }),
+            decode: jest.fn((payload: unknown): unknown => payload),
+        },
+    ],
+] as const)('cache-operation-logging/C08 %s failure 只记录稳定 phase', async (phase, shouldCache, codec) => {
+    const provider = createProvider(undefined);
+    const providerName = `${phase}-failure`;
+    CacheProviderRegistry.register(providerName, provider.provider);
+    const businessError = new Error('original business failure');
+
+    class UserService {
+        @Cache(`${phase}-failure-users`, {
+            providerName,
+            errorCache: { ttl: 5, shouldCache, codec },
+        })
+        async getUser(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(events(mockLogger.debug)).toEqual(['cache.miss']);
+    expect(loggedMetadata(mockLogger.warn)).toEqual([
+        {
+            event: 'cache.error_cache_failed',
+            cacheName: `${phase}-failure-users`,
+            methodName: 'getUser',
+            providerName,
+            phase,
+        },
+    ]);
+    expect(mockLogger.debug.mock.invocationCallOrder[0]).toBeLessThan(mockLogger.warn.mock.invocationCallOrder[0]!);
+    expect(provider.set).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+});
+
+it('cache-operation-logging/C08 decode failure 先记录 warn，再按 miss 回填正常值', async () => {
+    const provider = createProvider(currentErrorEntry({ code: 'OTHER_CODEC' }));
+    CacheProviderRegistry.register('decode-failure', provider.provider);
+    const decode = jest.fn((): never => {
+        throw new Error('decode failed');
+    });
+    const businessMethod = jest.fn(() => 'fresh');
+
+    class UserService {
+        @Cache('decode-failure-users', {
+            providerName: 'decode-failure',
+            errorCache: { ttl: 5, codec: { encode: (error: unknown): unknown => error, decode } },
+        })
+        async getUser(): Promise<string> {
+            return businessMethod();
+        }
+    }
+
+    await expect(new UserService().getUser()).resolves.toBe('fresh');
+    expect(loggedMetadata(mockLogger.warn)).toEqual([
+        {
+            event: 'cache.error_cache_failed',
+            cacheName: 'decode-failure-users',
+            methodName: 'getUser',
+            providerName: 'decode-failure',
+            phase: 'decode',
+        },
+    ]);
+    expect(events(mockLogger.debug)).toEqual(['cache.miss', 'cache.write_dispatched']);
+    expect(events(mockLogger.debug)).not.toContain('cache.hit');
+    expect(mockLogger.warn.mock.invocationCallOrder[0]).toBeLessThan(mockLogger.debug.mock.invocationCallOrder[0]!);
+    expect(decode).toHaveBeenCalledTimes(1);
+    expect(businessMethod).toHaveBeenCalledTimes(1);
+});
+
+it('cache-operation-logging/M02 M05 策略失败日志不包含业务错误、codec 错误或循环 payload', async () => {
+    const provider = createProvider(undefined);
+    CacheProviderRegistry.register('sensitive-error-policy', provider.provider);
+    const businessError = new Error('phone=13800138000 credential=business-token');
+    const codecError = new Error('credential=codec-token');
+    const cyclicPayload: Record<string, unknown> = { secret: 'payload-token' };
+    cyclicPayload.self = cyclicPayload;
+    const cyclicEncode = jest.fn((): unknown => cyclicPayload);
+    const failedEncode = jest.fn((): never => {
+        throw codecError;
+    });
+
+    class UserService {
+        @Cache('sensitive-cyclic-users', {
+            providerName: 'sensitive-error-policy',
+            errorCache: { ttl: 5, codec: { encode: cyclicEncode, decode: (payload: unknown): unknown => payload } },
+        })
+        async getCyclicUser(): Promise<never> {
+            throw businessError;
+        }
+
+        @Cache('sensitive-codec-users', {
+            providerName: 'sensitive-error-policy',
+            errorCache: { ttl: 5, codec: { encode: failedEncode, decode: (payload: unknown): unknown => payload } },
+        })
+        async getCodecFailure(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    const service = new UserService();
+    await expect(service.getCyclicUser()).rejects.toBe(businessError);
+    await expect(service.getCodecFailure()).rejects.toBe(businessError);
+    const metadata = [...loggedMetadata(mockLogger.debug), ...loggedMetadata(mockLogger.warn)];
+    const serialized = JSON.stringify(metadata);
+    for (const secret of ['13800138000', 'business-token', 'codec-token', 'payload-token']) {
+        expect(serialized).not.toContain(secret);
+    }
+    expect(loggedMetadata(mockLogger.warn)).toEqual([
+        {
+            event: 'cache.error_cache_failed',
+            cacheName: 'sensitive-cyclic-users',
+            methodName: 'getCyclicUser',
+            providerName: 'sensitive-error-policy',
+            phase: 'encode',
+        },
+        {
+            event: 'cache.error_cache_failed',
+            cacheName: 'sensitive-codec-users',
+            methodName: 'getCodecFailure',
+            providerName: 'sensitive-error-policy',
+            phase: 'encode',
+        },
+    ]);
+    expect(cyclicEncode).toHaveBeenCalledTimes(1);
+    expect(failedEncode).toHaveBeenCalledTimes(1);
+    expect(provider.set).not.toHaveBeenCalled();
+});
+
+it('Logger warn 写入失败不改变策略旁路或原业务异常', async () => {
+    const provider = createProvider(undefined);
+    CacheProviderRegistry.register('failed-logger-policy', provider.provider);
+    const businessError = new Error('business error');
+    mockLogger.warn.mockImplementation(() => {
+        throw new Error('logger warn failed');
+    });
+
+    class UserService {
+        @Cache('failed-logger-users', {
+            providerName: 'failed-logger-policy',
+            errorCache: {
+                ttl: 5,
+                shouldCache: (): never => {
+                    throw new Error('predicate failed');
+                },
+            },
+        })
+        async getUser(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(provider.set).not.toHaveBeenCalled();
 });

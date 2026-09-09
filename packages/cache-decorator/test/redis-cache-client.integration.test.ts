@@ -3,7 +3,7 @@ import Redis from 'ioredis';
 import { createIoredisCacheClient } from '../src/adapters/ioredis-cache-client';
 import { createNodeRedisCacheClient } from '../src/adapters/node-redis-cache-client';
 import { RedisCacheProvider } from '../src/core/redis-cache';
-import { writeLegacyRedisCache } from './helpers/legacy-redis-cache';
+import { readLegacyRedisCache, writeLegacyRedisCache } from './helpers/legacy-redis-cache';
 import { RedisFixture, createIsolatedDatabaseRedisFixture, createRedisFixture } from './helpers/redis-fixture';
 
 const redisUrl = process.env.CACHE_DECORATOR_TEST_REDIS_URL;
@@ -205,6 +205,34 @@ redisTests('Redis 客户端数据与互操作协议', () => {
 
         await expect(nodeProvider.get(stringKey)).resolves.toBe('legacy-string');
         await expect(ioProvider.get(objectKey)).resolves.toEqual({ legacy: true });
+    });
+
+    it('旧读取方可解析新异常 envelope，但按旧逻辑抛出未解码对象', async () => {
+        if (!fixture) {
+            throw new Error('Redis fixture is required');
+        }
+        const key = fixture.key();
+        const envelope = {
+            kind: '@jintianxiayu/cache-decorator/error',
+            version: 1,
+            payload: { type: 'error', name: 'Error', message: 'not found' },
+        };
+        await nodeProvider.set(key, { error: envelope }, 30);
+
+        const legacyEntry = await readLegacyRedisCache(fixture.io, key);
+        expect(legacyEntry).toEqual({ error: envelope });
+        let legacyThrown: unknown;
+        try {
+            if (typeof legacyEntry === 'object' && legacyEntry !== null && 'error' in legacyEntry) {
+                throw legacyEntry.error;
+            }
+        } catch (error) {
+            legacyThrown = error;
+        }
+
+        expect(legacyThrown).toEqual(envelope);
+        expect(legacyThrown).not.toBeInstanceOf(Error);
+        expect(await fixture.io.ttl(key)).toBeGreaterThan(20);
     });
 
     it('cache-evict-allentries-prefix/RedisCacheProvider 使用 SCAN 迭代删除', async () => {

@@ -6,8 +6,10 @@
 
 - [安装](#安装)
 - [快速开始](#快速开始)
+- [异常缓存策略](#异常缓存策略)
 - [缓存日志](#缓存日志)
 - [Redis](#redis)
+- [异常缓存迁移](#异常缓存迁移)
 - [API](#api)
 
 ## 安装
@@ -65,6 +67,8 @@ class UserService {
 
 `ttl` 的单位是秒；`undefined` 或 `0` 表示不设置过期时间。
 
+业务异常默认不写入 Provider。只有显式配置 `errorCache` 时才会持久化异常，且异常必须使用独立的有限 TTL。
+
 > `@Cache` 和 `@CacheEvict` 仅适用于返回 Promise 的方法。装饰同步方法会让调用方收到 Promise，而不是原返回值。
 
 ### 自定义缓存 Key
@@ -90,6 +94,76 @@ class UserService {
 }
 ```
 
+## 异常缓存策略
+
+默认关闭异常缓存可以避免数据库、网络、超时、限流等瞬时故障被持续放大。只有能够安全复用的稳定业务异常才应通过白名单筛选器短时缓存：
+
+```typescript
+class UserNotFoundError extends Error {}
+
+class UserService {
+    @Cache('user', {
+        ttl: 300,
+        errorCache: {
+            ttl: 10,
+            shouldCache: (error: unknown): boolean => error instanceof UserNotFoundError,
+        },
+    })
+    async getUser(id: number): Promise<{ id: number }> {
+        throw new UserNotFoundError(`User ${id} not found`);
+    }
+}
+```
+
+- `errorCache` 省略时，业务异常不会持久化；相同 key 的执行中调用仍会复用同一个 pending Promise。
+- `errorCache.ttl` 必须是大于零的有限整数秒，不能继承正常结果的 `ttl`。非法值会在 legacy decorator 求值时抛出 `RangeError`。
+- `shouldCache` 省略时会接受所有业务异常；返回 `false` 或自身抛错时按 fail-closed 跳过写入，并继续抛出原业务异常。
+- Provider 解析/读取、key resolver、Logger 和 codec 的故障不会作为业务异常缓存。
+- 异常写入沿用 fire-and-forget 边界；同步可观察的 Provider 写入失败不会替换已经发生的业务异常。
+
+默认 codec 会把标准 `Error` 保存为只包含 `name` 和 `message` 的 JSON payload。缓存命中会创建新的 `Error`，不保留原对象身份、`stack`、自定义原型或任意自有属性。非 `Error` 抛出值必须能安全 JSON 往返；`undefined`、函数、symbol、循环引用和非有限数会跳过写入。
+
+错误消息仍可能包含敏感信息。需要脱敏或恢复领域错误类型时，应提供成对的自定义 codec，并确保共享同一 cache key 的所有进程使用兼容协议：
+
+```typescript
+import { Cache, type CacheErrorCodec } from '@jintianxiayu/cache-decorator';
+
+class UserNotFoundError extends Error {
+    constructor(readonly code: string) {
+        super('User not found');
+        this.name = 'UserNotFoundError';
+    }
+}
+
+const userNotFoundCodec: CacheErrorCodec = {
+    encode(error: unknown): unknown {
+        if (!(error instanceof UserNotFoundError)) {
+            throw new TypeError('Unsupported error');
+        }
+        return { code: error.code };
+    },
+    decode(payload: unknown): unknown {
+        if (typeof payload !== 'object' || payload === null || !('code' in payload)) {
+            throw new TypeError('Invalid error payload');
+        }
+        return new UserNotFoundError(String(payload.code));
+    },
+};
+
+class UserService {
+    @Cache('user', {
+        errorCache: {
+            ttl: 10,
+            shouldCache: (error: unknown): boolean => error instanceof UserNotFoundError,
+            codec: userNotFoundCodec,
+        },
+    })
+    async getUser(): Promise<never> {
+        throw new UserNotFoundError('USER_NOT_FOUND');
+    }
+}
+```
+
 ## 缓存日志
 
 缓存装饰器使用名称固定为 `@jintianxiayu/cache-decorator` 的 Logger。应用必须安装兼容版本的
@@ -101,26 +175,28 @@ Logger。
 `CacheOptions.logging`、`debug` 或 Logger 回调。高频正常决策默认使用 `debug`，可恢复回退使用 `warn`，缓存基础设施失败使用
 `error`；逐调用事件不使用 `info`。
 
-| level   | event                    | 含义                                                   |
-| ------- | ------------------------ | ------------------------------------------------------ |
-| `debug` | `cache.pending_hit`      | 复用相同 key 的执行中 Promise                          |
-| `debug` | `cache.hit`              | 命中 value 或 error 缓存条目                           |
-| `debug` | `cache.miss`             | Provider 正常返回未命中                                |
-| `debug` | `cache.write_dispatched` | `set()` 已同步返回控制权，不表示异步写入成功           |
-| `debug` | `cache.evict_dispatched` | 单 key `delete()` 已同步返回控制权，不表示异步删除成功 |
-| `debug` | `cache.evict_completed`  | 已等待的 `deleteByPattern()` 正常完成                  |
-| `warn`  | `cache.key_fallback`     | 自定义 key resolver 失败，已回退默认 key               |
-| `warn`  | `cache.evict_skipped`    | 业务方法失败，淘汰被跳过                               |
-| `error` | `cache.operation_failed` | Provider 解析或可观察的读取、写入、淘汰操作失败        |
+| level   | event                       | 含义                                                   |
+| ------- | --------------------------- | ------------------------------------------------------ |
+| `debug` | `cache.pending_hit`         | 复用相同 key 的执行中 Promise                          |
+| `debug` | `cache.hit`                 | 命中 value 或当前策略可解码的 error 条目               |
+| `debug` | `cache.miss`                | Provider 正常返回未命中或异常条目被安全旁路            |
+| `debug` | `cache.write_dispatched`    | `set()` 已同步返回控制权，不表示异步写入成功           |
+| `debug` | `cache.error_cache_skipped` | 策略禁用、筛选拒绝或存量异常条目被安全旁路             |
+| `debug` | `cache.evict_dispatched`    | 单 key `delete()` 已同步返回控制权，不表示异步删除成功 |
+| `debug` | `cache.evict_completed`     | 已等待的 `deleteByPattern()` 正常完成                  |
+| `warn`  | `cache.key_fallback`        | 自定义 key resolver 失败，已回退默认 key               |
+| `warn`  | `cache.error_cache_failed`  | 异常筛选、encode 或 decode 失败，已 fail-closed        |
+| `warn`  | `cache.evict_skipped`       | 业务方法失败，淘汰被跳过                               |
+| `error` | `cache.operation_failed`    | Provider 解析或可观察的读取、写入、淘汰操作失败        |
 
 `write_dispatched` 和 `evict_dispatched` 只描述调用已发起。为保持既有时序，decorator 不等待 `set()` 或单 key
 `delete()` 返回的 Promise，也不为日志附加 rejection handler；异步失败不会被描述为成功或完成。只有本来就会等待的全量淘汰可记录
 `evict_completed`。
 
 每条日志只包含 `event`、`cacheName`、`methodName`、`providerName`，并按事件增加 `entryType`、`scope`、
-`reason`、`operation` 或基础设施 `error`。日志不会包含方法参数、业务返回值、缓存值、业务异常内容或完整逻辑/物理 cache
-key，也不会为日志额外序列化这些值。Provider 错误和现有 `LoggerContext` 的 `traceId` 继续由 Logger 统一规范化、脱敏和关联；
-cache 包不直接读写 LoggerContext。Logger 自身同步失败会被隔离，不会替换缓存结果、业务结果或原始 Provider 错误。
+`reason`、`phase`、`operation` 或基础设施 `error`。日志不会包含方法参数、业务返回值、缓存值、业务异常内容、codec
+payload、策略回调错误或完整逻辑/物理 cache key，也不会为日志额外序列化这些值。Provider 错误和现有
+`LoggerContext` 的 `traceId` 继续由 Logger 统一规范化、脱敏和关联；cache 包不直接读写 LoggerContext。Logger 自身同步失败会被隔离，不会替换缓存结果、业务结果或原始 Provider 错误。
 
 ## Redis
 
@@ -214,6 +290,17 @@ CacheProviderRegistry.register('redis', new RedisCacheProvider(client));
 > **危险：`RedisCacheProvider.clear()` 会执行 `FLUSHDB`，清空连接当前选择的整个 Redis database。**
 > `keyPrefix` 不会缩小其范围；共享 database 时不要调用它。
 
+## 异常缓存迁移
+
+异常条目的外层仍是 `{ error }`，内容改为带 kind/version 的 JSON envelope。新版本会旁路所有旧版未版本化异常条目；当前装饰器未启用 `errorCache` 时也会旁路新版异常条目。旁路不会自动删除 key，后续业务成功可用正常 `{ value }` 覆盖，或由调用方使用现有精确淘汰能力清理。
+
+共享 Redis cache key 的系统必须采用两阶段升级：
+
+1. 先把所有读取方升级到包含安全旁路逻辑的新 major，并保持 `errorCache` 省略。
+2. 确认所有读取方升级完成、共享 key 的 codec 配置兼容后，再启用有限 TTL 的 `errorCache`。
+
+旧版本可以把新 envelope 解析为普通 JSON，但会按旧逻辑抛出未解码对象；因此混合版本期间不得写入新版异常条目。回滚到旧 major 前，应先停止异常 envelope 写入并精确清理受影响的异常 key，不要默认执行数据库级 `clear()`。
+
 ### 异常与支持范围
 
 - Redis 命令拒绝会保留原始错误；不受支持的返回结构会抛出 `TypeError`。
@@ -248,6 +335,7 @@ const provider = new RedisCacheProvider(createIoredisCacheClient(redis));
 - `options.ttl`：过期时间，单位为秒。
 - `options.providerName`：指定已注册的 `CacheProvider`。
 - `options.key`：`undefined`/`null` 使用默认参数 key；字符串使用固定 key；函数根据方法参数返回 key。
+- `options.errorCache`：可选异常策略；包含必填正整数秒级 `ttl`，以及可选同步 `shouldCache` 和成对 `codec`。
 
 ### @CacheEvict(cacheName, options?)
 

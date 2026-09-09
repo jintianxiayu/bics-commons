@@ -1,11 +1,97 @@
 import { createIoredisCacheClient } from '../src/adapters/ioredis-cache-client';
+import { createNodeRedisCacheClient } from '../src/adapters/node-redis-cache-client';
 import { CacheProviderRegistry } from '../src/core/cache-provider-registry';
-import { IoredisCacheClientSource } from '../src/core/redis-cache-client';
+import { IoredisCacheClientSource, NodeRedisCacheClientSource } from '../src/core/redis-cache-client';
 import { KeyBuilder } from '../src/core/key-builder';
 import { MemoryCacheProvider } from '../src/core/native-cache';
 import { RedisCacheProvider } from '../src/core/redis-cache';
 import { CacheEvict } from '../src/decorators/cache-evict';
-import { Cache } from '../src/decorators/cache';
+import { Cache, type CacheErrorCodec } from '../src/decorators/cache';
+
+interface SharedRedisState {
+    readonly values: Map<string, string>;
+    readonly writes: Array<{ readonly key: string; readonly value: string; readonly ttlSeconds?: number }>;
+    getError?: unknown;
+}
+
+function createSharedRedisState(): SharedRedisState {
+    return { values: new Map<string, string>(), writes: [] };
+}
+
+/** 创建会模拟 ioredis 透明 keyPrefix 的字符串命令源。 */
+function createSharedIoredisSource(state: SharedRedisState, keyPrefix: string): IoredisCacheClientSource {
+    const physicalKey = (key: string): string => `${keyPrefix}${key}`;
+    return {
+        options: Object.freeze({ keyPrefix }),
+        get(key: string): Promise<unknown> {
+            if (state.getError !== undefined) {
+                return Promise.reject(state.getError);
+            }
+            return Promise.resolve(state.values.get(physicalKey(key)) ?? null);
+        },
+        set(key: string, value: string): Promise<unknown> {
+            const resolvedKey = physicalKey(key);
+            state.values.set(resolvedKey, value);
+            state.writes.push({ key: resolvedKey, value });
+            return Promise.resolve('OK');
+        },
+        setex(key: string, ttlSeconds: number, value: string): Promise<unknown> {
+            const resolvedKey = physicalKey(key);
+            state.values.set(resolvedKey, value);
+            state.writes.push({ key: resolvedKey, value, ttlSeconds });
+            return Promise.resolve('OK');
+        },
+        del(...keys: string[]): Promise<unknown> {
+            for (const key of keys) {
+                state.values.delete(physicalKey(key));
+            }
+            return Promise.resolve(keys.length);
+        },
+        scan(..._args: Parameters<IoredisCacheClientSource['scan']>): Promise<unknown> {
+            return Promise.resolve(['0', []]);
+        },
+        flushdb(): Promise<unknown> {
+            state.values.clear();
+            return Promise.resolve('OK');
+        },
+    };
+}
+
+/** 创建接收显式物理 key 的 node-redis 字符串命令源。 */
+function createSharedNodeRedisSource(state: SharedRedisState): NodeRedisCacheClientSource {
+    return {
+        get(key: string): Promise<unknown> {
+            if (state.getError !== undefined) {
+                return Promise.reject(state.getError);
+            }
+            return Promise.resolve(state.values.get(key) ?? null);
+        },
+        set(key: string, value: string): Promise<unknown> {
+            state.values.set(key, value);
+            state.writes.push({ key, value });
+            return Promise.resolve('OK');
+        },
+        setEx(key: string, ttlSeconds: number, value: string): Promise<unknown> {
+            state.values.set(key, value);
+            state.writes.push({ key, value, ttlSeconds });
+            return Promise.resolve('OK');
+        },
+        del(keys: string | string[]): Promise<unknown> {
+            const deletedKeys = typeof keys === 'string' ? [keys] : keys;
+            for (const key of deletedKeys) {
+                state.values.delete(key);
+            }
+            return Promise.resolve(deletedKeys.length);
+        },
+        scan(): Promise<unknown> {
+            return Promise.resolve({ cursor: '0', keys: [] });
+        },
+        flushDb(): Promise<unknown> {
+            state.values.clear();
+            return Promise.resolve('OK');
+        },
+    };
+}
 
 class FakeIoredisCacheClientSource implements IoredisCacheClientSource {
     readonly options = Object.freeze({ keyPrefix: '' });
@@ -198,4 +284,257 @@ it('cache-operation-logging/A03 日志改造保持旧版 Redis key、entry、TTL
 
     await expect(service.clearUsers()).resolves.toBe(true);
     expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'compat-users*', 'COUNT', 100);
+});
+
+it('标准 Error 通过 ioredis/node-redis 双向共享版本化异常条目', async () => {
+    const state = createSharedRedisState();
+    const keyPrefix = 'cross-client:';
+    const ioProvider = new RedisCacheProvider(createIoredisCacheClient(createSharedIoredisSource(state, keyPrefix)));
+    const nodeProvider = new RedisCacheProvider(
+        createNodeRedisCacheClient(createSharedNodeRedisSource(state), { keyPrefix })
+    );
+    CacheProviderRegistry.register('cross-io', ioProvider);
+    CacheProviderRegistry.register('cross-node', nodeProvider);
+    const ioBusinessError = new Error('written by ioredis');
+    ioBusinessError.name = 'IoBusinessError';
+    const nodeBusinessError = new Error('written by node-redis');
+    nodeBusinessError.name = 'NodeBusinessError';
+    let ioReaderCalls = 0;
+    let nodeReaderCalls = 0;
+
+    class ErrorService {
+        @Cache('io-to-node-errors', {
+            providerName: 'cross-io',
+            key: 'shared',
+            errorCache: { ttl: 11 },
+        })
+        async writeWithIoredis(): Promise<never> {
+            throw ioBusinessError;
+        }
+
+        @Cache('io-to-node-errors', {
+            providerName: 'cross-node',
+            key: 'shared',
+            errorCache: { ttl: 11 },
+        })
+        async readWithNodeRedis(): Promise<never> {
+            nodeReaderCalls += 1;
+            throw new Error('node reader should not run');
+        }
+
+        @Cache('node-to-io-errors', {
+            providerName: 'cross-node',
+            key: 'shared',
+            errorCache: { ttl: 13 },
+        })
+        async writeWithNodeRedis(): Promise<never> {
+            throw nodeBusinessError;
+        }
+
+        @Cache('node-to-io-errors', {
+            providerName: 'cross-io',
+            key: 'shared',
+            errorCache: { ttl: 13 },
+        })
+        async readWithIoredis(): Promise<never> {
+            ioReaderCalls += 1;
+            throw new Error('ioredis reader should not run');
+        }
+    }
+
+    const service = new ErrorService();
+    await expect(service.writeWithIoredis()).rejects.toBe(ioBusinessError);
+    await expect(service.readWithNodeRedis()).rejects.toMatchObject({
+        name: 'IoBusinessError',
+        message: 'written by ioredis',
+    });
+    await expect(service.writeWithNodeRedis()).rejects.toBe(nodeBusinessError);
+    await expect(service.readWithIoredis()).rejects.toMatchObject({
+        name: 'NodeBusinessError',
+        message: 'written by node-redis',
+    });
+
+    expect(nodeReaderCalls).toBe(0);
+    expect(ioReaderCalls).toBe(0);
+    expect(state.writes.map(({ ttlSeconds }) => ttlSeconds)).toEqual([11, 13]);
+    expect([...state.values.keys()]).toEqual(
+        expect.arrayContaining([
+            `${keyPrefix}${KeyBuilder.build('io-to-node-errors', ['shared'])}`,
+            `${keyPrefix}${KeyBuilder.build('node-to-io-errors', ['shared'])}`,
+        ])
+    );
+});
+
+it('兼容自定义 codec 可跨 Redis 客户端恢复领域异常', async () => {
+    class DomainError extends Error {
+        constructor(readonly code: string) {
+            super(`domain:${code}`);
+            this.name = 'DomainError';
+        }
+    }
+
+    const state = createSharedRedisState();
+    const keyPrefix = 'custom-codec:';
+    const ioProvider = new RedisCacheProvider(createIoredisCacheClient(createSharedIoredisSource(state, keyPrefix)));
+    const nodeProvider = new RedisCacheProvider(
+        createNodeRedisCacheClient(createSharedNodeRedisSource(state), { keyPrefix })
+    );
+    CacheProviderRegistry.register('custom-io', ioProvider);
+    CacheProviderRegistry.register('custom-node', nodeProvider);
+    const codec: CacheErrorCodec = {
+        encode(error: unknown): unknown {
+            if (!(error instanceof DomainError)) {
+                throw new TypeError('unexpected domain error');
+            }
+            return { code: error.code };
+        },
+        decode(payload: unknown): unknown {
+            if (typeof payload !== 'object' || payload === null || !('code' in payload)) {
+                throw new TypeError('invalid domain payload');
+            }
+            return new DomainError(String(payload.code));
+        },
+    };
+    const businessError = new DomainError('NOT_FOUND');
+    const reader = jest.fn();
+
+    class DomainService {
+        @Cache('cross-domain-errors', {
+            providerName: 'custom-io',
+            key: 'shared',
+            errorCache: { ttl: 7, codec },
+        })
+        async write(): Promise<never> {
+            throw businessError;
+        }
+
+        @Cache('cross-domain-errors', {
+            providerName: 'custom-node',
+            key: 'shared',
+            errorCache: { ttl: 7, codec },
+        })
+        async read(): Promise<never> {
+            reader();
+            throw new Error('reader should not run');
+        }
+    }
+
+    const service = new DomainService();
+    await expect(service.write()).rejects.toBe(businessError);
+    await expect(service.read()).rejects.toMatchObject({ name: 'DomainError', code: 'NOT_FOUND' });
+    expect(reader).not.toHaveBeenCalled();
+    expect(JSON.parse(state.writes[0]!.value)).toEqual({
+        error: {
+            kind: '@jintianxiayu/cache-decorator/error',
+            version: 1,
+            payload: { code: 'NOT_FOUND' },
+        },
+    });
+});
+
+it('Redis 中 legacy 与禁用的异常条目均旁路为 miss 并由成功结果覆盖', async () => {
+    const state = createSharedRedisState();
+    const keyPrefix = 'bypass:';
+    const nodeProvider = new RedisCacheProvider(
+        createNodeRedisCacheClient(createSharedNodeRedisSource(state), { keyPrefix })
+    );
+    CacheProviderRegistry.register('bypass-node', nodeProvider);
+    const legacyKey = KeyBuilder.build('legacy-redis-errors', ['shared']);
+    const disabledKey = KeyBuilder.build('disabled-redis-errors', ['shared']);
+    state.values.set(`${keyPrefix}${legacyKey}`, JSON.stringify({ error: { message: 'legacy' } }));
+    state.values.set(
+        `${keyPrefix}${disabledKey}`,
+        JSON.stringify({
+            error: {
+                kind: '@jintianxiayu/cache-decorator/error',
+                version: 1,
+                payload: { type: 'error', name: 'Error', message: 'cached' },
+            },
+        })
+    );
+    const legacyBusiness = jest.fn(() => 'legacy-fresh');
+    const disabledBusiness = jest.fn(() => 'disabled-fresh');
+
+    class UserService {
+        @Cache('legacy-redis-errors', {
+            providerName: 'bypass-node',
+            key: 'shared',
+            errorCache: { ttl: 5 },
+        })
+        async readLegacy(): Promise<string> {
+            return legacyBusiness();
+        }
+
+        @Cache('disabled-redis-errors', { providerName: 'bypass-node', key: 'shared' })
+        async readDisabled(): Promise<string> {
+            return disabledBusiness();
+        }
+    }
+
+    const service = new UserService();
+    await expect(service.readLegacy()).resolves.toBe('legacy-fresh');
+    await expect(service.readDisabled()).resolves.toBe('disabled-fresh');
+    expect(legacyBusiness).toHaveBeenCalledTimes(1);
+    expect(disabledBusiness).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(state.values.get(`${keyPrefix}${legacyKey}`)!)).toEqual({ value: 'legacy-fresh' });
+    expect(JSON.parse(state.values.get(`${keyPrefix}${disabledKey}`)!)).toEqual({ value: 'disabled-fresh' });
+});
+
+it('不可序列化异常 payload 不向 Redis 发送 SET', async () => {
+    const state = createSharedRedisState();
+    const keyPrefix = 'invalid-payload:';
+    const ioProvider = new RedisCacheProvider(createIoredisCacheClient(createSharedIoredisSource(state, keyPrefix)));
+    CacheProviderRegistry.register('invalid-payload-io', ioProvider);
+    const businessError = new Error('business failure');
+    const cyclicPayload: Record<string, unknown> = {};
+    cyclicPayload.self = cyclicPayload;
+
+    class UserService {
+        @Cache('invalid-redis-errors', {
+            providerName: 'invalid-payload-io',
+            errorCache: {
+                ttl: 5,
+                codec: {
+                    encode: (): unknown => cyclicPayload,
+                    decode: (payload: unknown): unknown => payload,
+                },
+            },
+        })
+        async getUser(): Promise<never> {
+            throw businessError;
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(businessError);
+    expect(state.writes).toEqual([]);
+    expect(state.values).toEqual(new Map());
+});
+
+it('Redis GET 失败传播基础设施错误且不调用策略或业务方法', async () => {
+    const state = createSharedRedisState();
+    const readError = new Error('GET unavailable');
+    state.getError = readError;
+    const nodeProvider = new RedisCacheProvider(createNodeRedisCacheClient(createSharedNodeRedisSource(state)));
+    CacheProviderRegistry.register('failed-get-node', nodeProvider);
+    const shouldCache = jest.fn((_error: unknown): boolean => true);
+    const encode = jest.fn((error: unknown): unknown => error);
+    const decode = jest.fn((payload: unknown): unknown => payload);
+    const businessMethod = jest.fn();
+
+    class UserService {
+        @Cache('failed-get-errors', {
+            providerName: 'failed-get-node',
+            errorCache: { ttl: 5, shouldCache, codec: { encode, decode } },
+        })
+        async getUser(): Promise<unknown> {
+            return businessMethod();
+        }
+    }
+
+    await expect(new UserService().getUser()).rejects.toBe(readError);
+    expect(businessMethod).not.toHaveBeenCalled();
+    expect(shouldCache).not.toHaveBeenCalled();
+    expect(encode).not.toHaveBeenCalled();
+    expect(decode).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([]);
 });

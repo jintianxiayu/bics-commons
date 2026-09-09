@@ -7,6 +7,8 @@ export type CacheLogEvent =
     | 'cache.hit'
     | 'cache.miss'
     | 'cache.write_dispatched'
+    | 'cache.error_cache_skipped'
+    | 'cache.error_cache_failed'
     | 'cache.evict_dispatched'
     | 'cache.evict_completed'
     | 'cache.key_fallback'
@@ -27,7 +29,14 @@ export interface CacheLogContext {
     readonly providerName: string;
     readonly entryType?: 'value' | 'error';
     readonly scope?: 'key' | 'allEntries';
-    readonly reason?: 'resolver_error' | 'business_error';
+    readonly reason?:
+        | 'resolver_error'
+        | 'business_error'
+        | 'disabled'
+        | 'predicate_rejected'
+        | 'legacy_entry'
+        | 'disabled_entry';
+    readonly phase?: 'predicate' | 'encode' | 'decode';
     readonly operation?: 'provider_resolution' | 'read' | 'write' | 'evict';
     readonly error?: unknown;
 }
@@ -38,6 +47,8 @@ const CACHE_LOG_DEFINITIONS: Readonly<Record<CacheLogEvent, CacheLogDefinition>>
     'cache.hit': { level: 'debug', message: 'Cache entry hit' },
     'cache.miss': { level: 'debug', message: 'Cache entry missed' },
     'cache.write_dispatched': { level: 'debug', message: 'Cache write dispatched' },
+    'cache.error_cache_skipped': { level: 'debug', message: 'Cache error entry skipped' },
+    'cache.error_cache_failed': { level: 'warn', message: 'Cache error policy failed' },
     'cache.evict_dispatched': { level: 'debug', message: 'Cache eviction dispatched' },
     'cache.evict_completed': { level: 'debug', message: 'Cache eviction completed' },
     'cache.key_fallback': { level: 'warn', message: 'Cache key resolver failed; using default key' },

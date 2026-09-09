@@ -1,4 +1,13 @@
 import 'reflect-metadata';
+import {
+    decodeCacheError,
+    encodeCacheError,
+    isCurrentCacheErrorPayload,
+    normalizeCacheErrorPolicy,
+    type CacheErrorCodec,
+    type CacheErrorPolicy,
+    type NormalizedCacheErrorPolicy,
+} from '../core/cache-error';
 import { cacheProviderLabel, logCacheEvent, type CacheLogContext } from '../core/cache-logger';
 import type { CacheProvider } from '../core/cache-provider';
 import { CacheProviderRegistry } from '../core/cache-provider-registry';
@@ -12,6 +21,8 @@ import { PendingCache } from '../core/pending-cache';
  * - function: 接收方法参数数组，返回自定义字符串
  */
 export type CacheKeyResolver = null | string | ((...args: unknown[]) => string);
+
+export type { CacheErrorCodec, CacheErrorPolicy };
 
 /**
  * @Cache 装饰器配置项
@@ -34,6 +45,11 @@ export interface CacheOptions {
      * - function: 调用函数后使用 KeyBuilder.build(cacheName, [result])
      */
     key?: CacheKeyResolver;
+
+    /**
+     * 业务异常缓存策略；省略时不向 Provider 持久化业务异常。
+     */
+    errorCache?: CacheErrorPolicy;
 }
 
 /**
@@ -61,6 +77,19 @@ interface CacheWriteRequest<T> {
     readonly entry: CacheEntry<T>;
     readonly entryType: 'value' | 'error';
     readonly ttl: number | undefined;
+    readonly logContext: CacheLogContext;
+}
+
+type CacheReadResult<T> =
+    | { readonly type: 'value'; readonly value: T }
+    | { readonly type: 'error'; readonly error: unknown }
+    | { readonly type: 'miss' };
+
+interface BusinessErrorRequest {
+    readonly error: unknown;
+    readonly errorPolicy: NormalizedCacheErrorPolicy | undefined;
+    readonly provider: CacheProvider;
+    readonly cacheKey: string;
     readonly logContext: CacheLogContext;
 }
 
@@ -99,6 +128,97 @@ function dispatchCacheWrite<T>(request: CacheWriteRequest<T>): void {
 }
 
 /**
+ * 提交异常条目写入；同步 Provider 失败只记录基础设施错误，不遮蔽已经发生的业务异常。
+ * @param request 异常写入所需 Provider、entry、TTL 和稳定日志上下文。
+ * @returns 无返回值；异步写入 Promise 保持既有 fire-and-forget 边界。
+ */
+function dispatchCacheErrorWrite(request: CacheWriteRequest<never>): void {
+    try {
+        request.provider.set(request.cacheKey, request.entry, request.ttl);
+    } catch (error) {
+        logCacheEvent('cache.operation_failed', { ...request.logContext, operation: 'write', error });
+        return;
+    }
+    logCacheEvent('cache.write_dispatched', { ...request.logContext, entryType: 'error' });
+}
+
+function isErrorCacheEntry<T>(entry: CacheEntry<T>): entry is ErrorCacheEntry {
+    return typeof entry === 'object' && entry !== null && 'error' in entry;
+}
+
+/**
+ * 按当前异常策略分类 Provider 条目，并只把可成功解码的当前版本异常视为命中。
+ * @param entry Provider 返回的缓存联合条目。
+ * @param errorPolicy 当前装饰器归一化后的异常策略。
+ * @param logContext 当前方法的稳定日志上下文。
+ * @returns value/error 命中结果，或需要继续业务流程的 miss。
+ */
+function resolveCachedEntry<T>(
+    entry: CacheEntry<T>,
+    errorPolicy: NormalizedCacheErrorPolicy | undefined,
+    logContext: CacheLogContext
+): CacheReadResult<T> {
+    if (!isErrorCacheEntry(entry)) {
+        logCacheEvent('cache.hit', { ...logContext, entryType: 'value' });
+        return { type: 'value', value: entry.value };
+    }
+    if (!isCurrentCacheErrorPayload(entry.error)) {
+        logCacheEvent('cache.error_cache_skipped', { ...logContext, reason: 'legacy_entry' });
+        return { type: 'miss' };
+    }
+    if (errorPolicy === undefined) {
+        logCacheEvent('cache.error_cache_skipped', { ...logContext, reason: 'disabled_entry' });
+        return { type: 'miss' };
+    }
+    try {
+        const error = decodeCacheError(entry.error, errorPolicy);
+        logCacheEvent('cache.hit', { ...logContext, entryType: 'error' });
+        return { type: 'error', error };
+    } catch (_error) {
+        logCacheEvent('cache.error_cache_failed', { ...logContext, phase: 'decode' });
+        return { type: 'miss' };
+    }
+}
+
+/**
+ * 按固定顺序评估筛选器、编码异常并发起独立 TTL 写入，任何策略失败都保留原业务异常。
+ * @param request 本次业务异常、当前策略、Provider、完整 key 与稳定日志上下文。
+ * @returns 无返回值。
+ */
+function handleBusinessError(request: BusinessErrorRequest): void {
+    const { error, errorPolicy, provider, cacheKey, logContext } = request;
+    if (errorPolicy === undefined) {
+        logCacheEvent('cache.error_cache_skipped', { ...logContext, reason: 'disabled' });
+        return;
+    }
+    if (errorPolicy.shouldCache !== undefined) {
+        let accepted: boolean;
+        try {
+            accepted = errorPolicy.shouldCache(error);
+            if (typeof accepted !== 'boolean') {
+                throw new TypeError('Cache error shouldCache must return a boolean');
+            }
+        } catch (_error) {
+            logCacheEvent('cache.error_cache_failed', { ...logContext, phase: 'predicate' });
+            return;
+        }
+        if (!accepted) {
+            logCacheEvent('cache.error_cache_skipped', { ...logContext, reason: 'predicate_rejected' });
+            return;
+        }
+    }
+
+    let entry: ErrorCacheEntry;
+    try {
+        entry = { error: encodeCacheError(error, errorPolicy) };
+    } catch (_error) {
+        logCacheEvent('cache.error_cache_failed', { ...logContext, phase: 'encode' });
+        return;
+    }
+    dispatchCacheErrorWrite({ provider, cacheKey, entry, entryType: 'error', ttl: errorPolicy.ttl, logContext });
+}
+
+/**
  * 解析缓存 key
  * @param keyResolver key 解析器
  * @param args 方法参数数组
@@ -134,6 +254,7 @@ export function Cache(
     cacheName: string,
     options?: CacheOptions
 ): (_target: object, _propertyKey: string, descriptor: PropertyDescriptor) => void {
+    const errorPolicy = normalizeCacheErrorPolicy(options?.errorCache);
     return function <T>(_target: object, propertyKey: string, descriptor: PropertyDescriptor) {
         const originalMethod = descriptor.value;
         const logContext: CacheLogContext = {
@@ -161,37 +282,32 @@ export function Cache(
                     throw error;
                 }
                 if (cached !== undefined) {
-                    if ('error' in cached) {
-                        logCacheEvent('cache.hit', { ...logContext, entryType: 'error' });
-                        throw cached.error;
+                    const cachedResult = resolveCachedEntry(cached, errorPolicy, logContext);
+                    if (cachedResult.type === 'value') {
+                        return cachedResult.value;
                     }
-                    logCacheEvent('cache.hit', { ...logContext, entryType: 'value' });
-                    return cached.value;
+                    if (cachedResult.type === 'error') {
+                        throw cachedResult.error;
+                    }
                 }
                 logCacheEvent('cache.miss', logContext);
 
+                let result: T;
                 try {
-                    const result = (await originalMethod.apply(this, args)) as T;
-                    dispatchCacheWrite({
-                        provider,
-                        cacheKey,
-                        entry: { value: result },
-                        entryType: 'value',
-                        ttl: options?.ttl,
-                        logContext,
-                    });
-                    return result;
+                    result = (await originalMethod.apply(this, args)) as T;
                 } catch (error) {
-                    dispatchCacheWrite({
-                        provider,
-                        cacheKey,
-                        entry: { error },
-                        entryType: 'error',
-                        ttl: options?.ttl,
-                        logContext,
-                    });
+                    handleBusinessError({ error, errorPolicy, provider, cacheKey, logContext });
                     throw error;
                 }
+                dispatchCacheWrite({
+                    provider,
+                    cacheKey,
+                    entry: { value: result },
+                    entryType: 'value',
+                    ttl: options?.ttl,
+                    logContext,
+                });
+                return result;
             })();
 
             pendingCache.set(cacheKey, promise);

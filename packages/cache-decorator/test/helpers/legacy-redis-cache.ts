@@ -20,3 +20,22 @@ export async function writeLegacyRedisCache(client: Redis, key: string, value: u
     }
     await client.set(key, serialized);
 }
+
+/**
+ * 使用旧版普通 JSON 读取规则恢复缓存值，不理解当前版本的异常 envelope。
+ * @param client 由测试创建并持有的 ioredis 连接。
+ * @param key 旧版本收到的原始缓存 key。
+ * @returns miss 时返回 undefined；合法 JSON 返回解析值，其余字符串保持原值。
+ * @throws Redis GET 命令失败时传播原始错误。
+ */
+export async function readLegacyRedisCache(client: Redis, key: string): Promise<unknown> {
+    const value = await client.get(key);
+    if (value === null) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(value) as unknown;
+    } catch {
+        return value;
+    }
+}

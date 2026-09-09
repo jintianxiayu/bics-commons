@@ -2,14 +2,25 @@
 
 TypeScript 工具库 monorepo，基于 pnpm workspace 管理。提供日志、缓存、HTTP 客户端、分布式锁等通用基础设施装饰器。
 
+## 目录
+
+- [包列表](#包列表)
+- [快速开始](#快速开始)
+- [本地手工发布](#本地手工发布)
+- [项目结构](#项目结构)
+- [技术栈](#技术栈)
+- [各包简介](#各包简介)
+- [贡献](#贡献)
+- [License](#license)
+
 ## 包列表
 
-| 包 | 版本 | 说明 |
-| --- | --- | --- |
-| [@jintianxiayu/logger](./packages/logger) | 0.1.3 | SLF4J 风格日志工厂，支持 YAML 配置、敏感信息脱敏、TraceContext |
-| [@jintianxiayu/cache-decorator](./packages/cache-decorator) | 0.1.3 | 方法缓存装饰器，支持 TTL、请求合并、可插拔后端（Memory/Redis） |
-| [@jintianxiayu/http-client-decorator](./packages/http-client-decorator) | 0.1.5 | 声明式 HTTP 客户端，洋葱模型中间件，RPC-like 调用体验 |
-| [@jintianxiayu/lock-decorator](./packages/lock-decorator) | 0.1.3 | 分布式锁装饰器，支持 Redis 存储和看门狗自动续期 |
+| 包                                                                      | 版本  | 说明                                                                             |
+| ----------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------- |
+| [@jintianxiayu/logger](./packages/logger)                               | 0.1.3 | SLF4J 风格日志工厂，支持 YAML 配置、敏感信息脱敏、TraceContext                   |
+| [@jintianxiayu/cache-decorator](./packages/cache-decorator)             | 1.0.0 | 方法缓存装饰器，支持 TTL、请求合并、显式短时异常缓存和可插拔后端（Memory/Redis） |
+| [@jintianxiayu/http-client-decorator](./packages/http-client-decorator) | 0.1.5 | 声明式 HTTP 客户端，洋葱模型中间件，RPC-like 调用体验                            |
+| [@jintianxiayu/lock-decorator](./packages/lock-decorator)               | 0.1.3 | 分布式锁装饰器，支持 Redis 存储和看门狗自动续期                                  |
 
 ## 快速开始
 
@@ -119,7 +130,8 @@ bics-commons/
 - `@CacheEvict` 装饰器：缓存清除
 - 可插拔后端（Memory / Redis / 自定义）
 - 请求合并：并发场景下返回同一个 Promise
-- 错误结果缓存：防止缓存穿透
+- 异常缓存默认关闭；可通过独立 TTL、白名单筛选器和 codec 显式短时启用
+- Redis 异常条目使用版本化 JSON 表示；共享 key 的读取方需先全部升级，再启用异常缓存
 
 ### @jintianxiayu/http-client-decorator
 
