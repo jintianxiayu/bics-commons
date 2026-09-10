@@ -23,10 +23,12 @@ interface LogWriteRequest {
     readonly metaArguments: readonly unknown[];
 }
 
-/** 测试或宿主应用可替换配置加载与兜底诊断，但日志工厂的生命周期语义保持不变。 */
+/** 测试或宿主应用可替换配置加载、兜底诊断与运行环境读取，但日志工厂的生命周期语义保持不变。 */
 export interface LoggerFactoryRuntimeOptions {
     readonly configLoader?: ConfigLoader;
     readonly diagnostics?: DiagnosticWriter;
+    readonly currentWorkingDirectory?: () => string;
+    readonly captureLogPosition?: typeof captureLogPosition;
 }
 
 /** 命名日志器保持稳定名称和策略，使业务模块共享底层运行时但仍能独立筛选与路由。 */
@@ -106,24 +108,29 @@ function shouldCaptureLogPosition(profile: EffectiveLoggerProfile): boolean {
 export class LoggerFactoryRuntime {
     private readonly configLoader: ConfigLoader;
     private readonly diagnostics: DiagnosticWriter;
+    private readonly currentWorkingDirectory: () => string;
+    private readonly capturePosition: typeof captureLogPosition;
     /** 日志器缓存中 K 为去除首尾空白后的业务名称，V 为绑定稳定配置的命名日志器实例。 */
     private readonly namedLoggers = new Map<string, LoggerInterface>();
     private state: FactoryState = 'UNINITIALIZED';
     private config?: NormalizedLoggerConfig;
     private masker?: SensitiveMasker;
     private runtime?: WinstonRuntime;
+    private projectRoot?: string;
     private shutdownPromise?: Promise<void>;
 
     /**
      * 创建独立日志运行时，便于测试或多实例宿主隔离配置和诊断通道。
      *
-     * @param options 可替换的配置加载器与诊断写入器。
+     * @param options 可替换的配置加载器、诊断写入器与运行环境读取函数。
      * @returns 新的日志运行时实例。
      * @throws 不主动抛出异常。
      */
     constructor(options: LoggerFactoryRuntimeOptions = {}) {
         this.configLoader = options.configLoader ?? new ConfigLoader();
         this.diagnostics = options.diagnostics ?? defaultDiagnosticWriter;
+        this.currentWorkingDirectory = options.currentWorkingDirectory ?? process.cwd;
+        this.capturePosition = options.captureLogPosition ?? captureLogPosition;
     }
 
     /**
@@ -143,12 +150,14 @@ export class LoggerFactoryRuntime {
         }
 
         // 所有依赖都构造成功后才切换为 ACTIVE，避免初始化异常留下可被使用的半成品状态。
+        const projectRoot = this.currentWorkingDirectory();
         const config = this.configLoader.load(source);
         const masker = new SensitiveMasker(config.masking);
         const runtime = createWinstonRuntime(config, this.diagnostics);
         this.config = config;
         this.masker = masker;
         this.runtime = runtime;
+        this.projectRoot = projectRoot;
         this.state = 'ACTIVE';
     }
 
@@ -228,7 +237,9 @@ export class LoggerFactoryRuntime {
 
         const contextTraceId = LoggerContext.get('traceId');
         const traceId = typeof contextTraceId === 'string' && contextTraceId.length > 0 ? contextTraceId : undefined;
-        const logPosition = shouldCaptureLogPosition(profile) ? (captureLogPosition() ?? '-') : undefined;
+        const logPosition = shouldCaptureLogPosition(profile)
+            ? (this.capturePosition(this.projectRoot!) ?? '-')
+            : undefined;
         /** Winston 信息对象中 K 为标准日志字段或内部路由 Symbol，V 为完成规范化和脱敏后的字段值。 */
         const info: Record<string | symbol, unknown> = {
             timestamp: new Date().toISOString(),

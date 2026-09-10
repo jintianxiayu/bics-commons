@@ -383,10 +383,18 @@ pattern 是该 Plain transport 的完整输出契约。`captureLogPosition` 开�
 1. 创建 Error 并读取 stack。
 2. 跳过 Node 内部帧和本包 LoggerFactory、NamedLogger、格式器帧。
 3. 选择第一条调用方帧。
-4. 输出 `file:line`，明确丢弃 column。
-5. 解析失败时返回 `-`，不影响日志写入。
+4. 将 Windows 分隔符统一为 `/`，并移除受支持的 `file://` 协议。
+5. 优先从最后一个完整 `node_modules` 目录段之后输出依赖路径；否则移除首次成功初始化时固定的项目目录前缀。
+6. 规范化路径超过 120 个字符且至少包含六段时，保留前三段和最后两段，以单个 `...` 折叠中间目录。
+7. 输出 `file:line`，明确丢弃 column；无法识别归属时保留规范化原路径。
+8. 解析失败时返回 `-`，不影响日志写入。
 
-测试需覆盖 Windows 路径、POSIX 路径、同步调用和异步调用，并断言结果不以 `:line:column` 形式出现。
+120 字符仅计算路径部分，不包含 `:line`。压缩不截断保留段，也不附加哈希；两个路径仅在被折叠的
+中间目录不同时允许产生相同结果。项目目录只在首次成功初始化时固定，失败初始化不会锁定目录，
+后续 `process.chdir()` 也不会改变同一 Logger 运行时的路径基准。
+
+测试需覆盖 Windows、UNC、POSIX、文件 URL、scoped/unscoped 依赖、pnpm/嵌套依赖、长度边界、
+安全回退、同步调用和异步调用，并断言结果不以 `:line:column` 形式出现。
 
 ## 10. SensitiveMasker
 

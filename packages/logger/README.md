@@ -221,7 +221,7 @@ Plain 输出可以通过 `pattern` 组合以下占位符：
 | `%{level}`        | `debug`、`info`、`warn` 或 `error`                   | Console 的 Plain 输出启用 `colors` 时会包含 ANSI 颜色码 |
 | `%{name}`         | `LoggerFactory.getLogger(name)` 对应的命名日志器名称 | 进程异常和未处理拒绝使用 `root`                         |
 | `%{traceId}`      | 当前 `LoggerContext` 中的非空字符串 `traceId`        | 未设置或不是非空字符串时输出 `-`                        |
-| `%{log_position}` | 发起日志调用的源码位置，格式为 `file:line`           | 未采集到位置时输出 `-`；不包含列号                      |
+| `%{log_position}` | 发起日志调用的规范化源码位置，格式为 `file:line`     | 未采集到位置时输出 `-`；不包含列号                      |
 | `%{message}`      | 传给日志方法的字符串消息                             | 始终存在；消息中的占位符文本不会再次展开                |
 | `%{meta}`         | 完成规范化和脱敏后的元数据 JSON                      | 没有元数据时输出 `-`；序列化失败时输出安全占位对象      |
 
@@ -231,6 +231,17 @@ Plain 输出可以通过 `pattern` 组合以下占位符：
 
 缺失的可选值在 Plain 输出中显示为 `-`。当 `captureLogPosition` 启用且输出格式需要调用位置时，
 `logPosition` 使用 `file:line`，不包含列号。
+
+调用位置统一使用 `/` 作为路径分隔符。项目内文件相对于 Logger 首次成功初始化时的工作目录输出；
+依赖文件从最后一个 `node_modules` 目录段之后输出，因此 pnpm 物理存储目录不会进入日志。例如：
+
+```text
+@jintianxiayu/http-client-decorator/dist/middlewares/debug.js:17
+```
+
+规范化后的路径部分超过 120 个字符且至少包含六段时，中间目录压缩为 `...`，保留前三段和
+最后两段，例如 `src/modules/order/.../services/handler.js:42`。压缩结果允许碰撞，不附加哈希；
+包名、目录名和文件名不会被逐段截断。无法识别项目或依赖归属时保留规范化后的原始路径。
 
 Console 和 File 可以分别选择 `plain` 或 `json`。文件输出使用日期/大小轮转；同一物理文件目标不能
 混用不同格式或冲突的轮转配置。

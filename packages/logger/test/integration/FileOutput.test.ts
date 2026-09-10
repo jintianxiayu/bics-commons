@@ -75,6 +75,49 @@ afterEach(() => {
 });
 
 describe('rotating file integration', () => {
+    test('uses the initialization directory and safely writes a missing position', async () => {
+        const directory = temporaryDirectory();
+        const logDirectory = join(directory, 'position-logs');
+        let currentDirectory = 'D:/failed-app';
+        const capturedRoots: string[] = [];
+        const factory = new LoggerFactoryRuntime({
+            configLoader: new ConfigLoader({ cwd: directory }),
+            diagnostics: () => undefined,
+            currentWorkingDirectory: () => currentDirectory,
+            captureLogPosition: (projectRoot) => {
+                capturedRoots.push(projectRoot);
+                return undefined;
+            },
+        });
+        assert.throws(() => factory.init(join(directory, 'missing.yaml')));
+        currentDirectory = 'D:/initial-app';
+        factory.init({
+            root: {
+                captureLogPosition: true,
+                console: { enabled: false },
+                file: {
+                    enabled: true,
+                    format: 'json',
+                    dirname: logDirectory,
+                    filename: 'position.log',
+                },
+            },
+            processErrors: {
+                uncaughtException: false,
+                unhandledRejection: false,
+                exitOnError: false,
+            },
+        });
+
+        currentDirectory = 'D:/changed-app';
+        factory.getLogger('position').info('position fallback');
+        await factory.shutdown({ timeout: 3_000 });
+
+        const event = JSON.parse(readLines(logFiles(logDirectory))[0]!) as { readonly logPosition: string };
+        assert.deepEqual(capturedRoots, ['D:/initial-app']);
+        assert.equal(event.logPosition, '-');
+    });
+
     test('writes logs when initialized with a direct config object', async () => {
         const directory = temporaryDirectory();
         const logDirectory = join(directory, 'direct-logs');
