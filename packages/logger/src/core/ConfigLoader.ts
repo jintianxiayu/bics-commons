@@ -10,7 +10,7 @@ import type {
     EffectiveProcessErrorConfig,
     NormalizedLoggerConfig,
 } from './model';
-import type { LoggerConfig, LogFormatName, LogLevelName } from '../types';
+import type { LoggerConfig, LogFormatName, LogLevelName, SensitiveFieldConfig } from '../types';
 import { LoggerConfigError } from './errors';
 import { validatePlainPattern } from '../format/PlainFormat';
 import { validateMaskTemplate } from './SensitiveMasker';
@@ -364,19 +364,24 @@ function parseMasking(value: unknown): EffectiveMaskingConfig {
     }
 
     const fieldsRecord = requireRecord(fieldsValue, 'masking.fields');
-    /** 脱敏字段映射中 K 为保持原始大小写的业务字段名，V 为已通过语法校验的掩码模板。 */
-    const fields: Record<string, string> = Object.create(null) as Record<string, string>;
+    /** 脱敏字段映射中 K 为保持原始大小写的业务字段名，V 为已校验的掩码模板或退出标记。 */
+    const fields: SensitiveFieldConfig = Object.create(null) as SensitiveFieldConfig;
     const normalizedNames = new Set<string>();
     for (const [field, template] of Object.entries(fieldsRecord)) {
-        if (field.length === 0 || typeof template !== 'string') {
-            throw new LoggerConfigError(`masking.fields.${field} must be a string template`);
+        if (field.length === 0) {
+            throw new LoggerConfigError('masking.fields field name must not be empty');
         }
         const normalized = field.toLowerCase();
         // 运行期字段匹配不区分大小写，因此配置阶段必须拒绝实际会互相覆盖的名称。
         if (normalizedNames.has(normalized)) {
             throw new LoggerConfigError(`Duplicate case-insensitive masking field: ${field}`);
         }
-        validateMaskTemplate(template);
+        if (template !== false && typeof template !== 'string') {
+            throw new LoggerConfigError(`masking.fields.${field} must be a string template or false`);
+        }
+        if (typeof template === 'string') {
+            validateMaskTemplate(template);
+        }
         normalizedNames.add(normalized);
         fields[field] = template;
     }

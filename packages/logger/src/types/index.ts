@@ -32,8 +32,8 @@ export interface LoggerOptions {
     file?: FileConfig;
 }
 
-/** 业务可以为自身敏感字段声明掩码模板；K 为字段名，V 为该字段使用的掩码模板。 */
-export type SensitiveFieldConfig = Record<string, string>;
+/** 业务可以为自身敏感字段声明策略；K 为字段名，V 为掩码模板或取消该字段脱敏的 false。 */
+export type SensitiveFieldConfig = Record<string, string | false>;
 
 /** 业务日志可能携带凭证或个人信息，因此在进入任一输出通道前统一应用该保护配置。 */
 export interface SensitiveMaskingConfig {

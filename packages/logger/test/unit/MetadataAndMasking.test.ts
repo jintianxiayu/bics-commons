@@ -77,6 +77,7 @@ describe('SensitiveMasker', () => {
                 tenantSecret: '********',
                 memberEmail: '{first2}***@{domain}',
                 account: '***{last4}',
+                literalFalse: 'false',
             },
         });
         /** 自定义脱敏结果映射中 K 为业务字段名，V 为应用对应模板后的安全字段值。 */
@@ -84,18 +85,50 @@ describe('SensitiveMasker', () => {
             tenantSecret: 'tenant-value',
             memberEmail: 'member@example.com',
             account: '123456789',
+            literalFalse: 'sensitive-value',
             phone: '123',
         }) as Record<string, unknown>;
 
         assert.equal(output.tenantSecret, '********');
         assert.equal(output.memberEmail, 'me***@example.com');
         assert.equal(output.account, '***6789');
+        assert.equal(output.literalFalse, 'false');
         assert.equal(output.phone, '********');
     });
 
+    test('removes only the matching policy and keeps nested masking', () => {
+        const input = {
+            Password: 'visible',
+            nested: {
+                PASSWORD: 'also-visible',
+                password: { token: 'nested-secret', value: 'nested-visible' },
+            },
+            passwd: 'alias-secret',
+            pwd: 'short-alias-secret',
+            passwordHash: 'hash-visible',
+        };
+        const masker = new SensitiveMasker({ enabled: true, fields: { password: false } });
+        const output = masker.mask(input) as typeof input;
+
+        assert.equal(output.Password, 'visible');
+        assert.equal(output.nested.PASSWORD, 'also-visible');
+        assert.deepEqual(output.nested.password, { token: '********', value: 'nested-visible' });
+        assert.equal(output.passwd, '********');
+        assert.equal(output.pwd, '********');
+        assert.equal(output.passwordHash, 'hash-visible');
+        assert.equal(input.Password, 'visible');
+        assert.equal(input.nested.password.token, 'nested-secret');
+        assert.equal(input.passwd, 'alias-secret');
+        assert.notEqual(output, input);
+        assert.notEqual(output.nested.password, input.nested.password);
+    });
+
     test('still clones when masking is disabled', () => {
-        const input = { password: 'visible', nested: { value: 1 } };
-        const output = new SensitiveMasker({ enabled: false, fields: {} }).mask(input) as typeof input;
+        const input = { password: 'visible', token: 'visible', nested: { value: 1 } };
+        const output = new SensitiveMasker({
+            enabled: false,
+            fields: { password: false, token: 'hidden' },
+        }).mask(input) as typeof input;
         assert.deepEqual(output, input);
         assert.notEqual(output, input);
         assert.notEqual(output.nested, input.nested);

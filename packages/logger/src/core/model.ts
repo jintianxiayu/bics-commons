@@ -1,4 +1,4 @@
-import type { LogFormatName, LogLevelName } from '../types';
+import type { LogFormatName, LogLevelName, SensitiveFieldConfig } from '../types';
 
 /** 配置校验后供运行时读取的控制台策略，保持只读可避免初始化后发生配置漂移。 */
 export interface EffectiveConsoleConfig {
@@ -31,8 +31,8 @@ export interface EffectiveLoggerProfile {
 /** 脱敏器实际执行的只读配置，确保所有输出通道遵循同一敏感字段规则。 */
 export interface EffectiveMaskingConfig {
     readonly enabled: boolean;
-    /** 脱敏字段映射中 K 为业务字段名，V 为已校验的掩码模板。 */
-    readonly fields: Readonly<Record<string, string>>;
+    /** 脱敏字段映射中 K 为业务字段名，V 为已校验的掩码模板或取消该字段脱敏的 false。 */
+    readonly fields: Readonly<SensitiveFieldConfig>;
 }
 
 /** 应用需统一决定致命进程错误的记录与退出行为，因此将相关开关固化后交给 Winston。 */

@@ -255,11 +255,11 @@ export class SensitiveMasker {
     private readonly runtime: MaskingRuntime;
 
     /**
-     * 合并内置敏感字段与业务自定义模板，建立大小写无关的字段策略表。
+     * 合并内置敏感字段、业务自定义模板与退出标记，建立大小写无关的字段策略表。
      *
      * @param config 已校验并冻结的脱敏配置。
      * @returns 新的脱敏器实例。
-     * @throws {LoggerConfigError} 当自定义模板无法编译时抛出。
+     * @throws {LoggerConfigError} 当字符串模板无法编译时抛出。
      */
     constructor(config: EffectiveMaskingConfig) {
         /** 可变构建映射中 K 为小写字段名，V 为编译中的掩码函数；构造完成后以只读接口保存。 */
@@ -273,7 +273,12 @@ export class SensitiveMasker {
         policies.set('email', maskEmail);
 
         for (const [field, template] of Object.entries(config.fields)) {
-            policies.set(normalizeFieldName(field), compileTemplate(template));
+            const normalized = normalizeFieldName(field);
+            if (template === false) {
+                policies.delete(normalized);
+                continue;
+            }
+            policies.set(normalized, compileTemplate(template));
         }
         this.runtime = Object.freeze({
             policies,

@@ -13,6 +13,18 @@ interface ConsoleJsonEvent {
     readonly logPosition: string;
     readonly meta: {
         readonly password: string;
+        readonly token: string;
+        readonly statusCode: number;
+    };
+}
+
+/** 字段退出夹具声明 Console 与 File 两个 JSON 通道共同消费的稳定字段。 */
+interface MaskingOptOutEvent {
+    readonly name: string;
+    readonly message: string;
+    readonly meta: {
+        readonly password: string;
+        readonly token: string;
         readonly statusCode: number;
     };
 }
@@ -91,6 +103,7 @@ processErrors:
     assert.equal(lines.length, 1);
     assert.ok(!lines[0]!.includes('\u001b'));
     assert.ok(!lines[0]!.includes('console-secret'));
+    assert.ok(!lines[0]!.includes('console-token-secret'));
     /** 解析事件中 K 为 JSON 日志字段名，V 为夹具输出的对应 JSON 值。 */
     const event = JSON.parse(lines[0]!) as ConsoleJsonEvent;
     assert.equal(event.name, 'console');
@@ -100,7 +113,60 @@ processErrors:
     // 正则说明：:\d+:\d+$ 会匹配行号和列号双数字结尾，doesNotMatch 用于确保列号未泄露到公共格式。
     assert.doesNotMatch(event.logPosition, /:\d+:\d+$/);
     assert.equal(event.meta.password, '********');
+    assert.equal(event.meta.token, '********');
     assert.equal(event.meta.statusCode, 201);
+});
+
+test('field opt-out is shared by JSON Console and File without changing message or input', async () => {
+    const directory = createTempDirectory('logger-mask-opt-out-');
+    temporaryDirectories.push(directory);
+    const logDirectory = join(directory, 'logs');
+    const configPath = writeConfig(
+        directory,
+        `
+root:
+  level: info
+  captureLogPosition: false
+  console:
+    enabled: true
+    colors: true
+    format: json
+  file:
+    enabled: true
+    format: json
+    dirname: '${logDirectory.replaceAll('\\', '/')}'
+    filename: combined.log
+masking:
+  enabled: true
+  fields:
+    password: false
+processErrors:
+  uncaughtException: false
+  unhandledRejection: false
+  exitOnError: false
+`
+    );
+    const fixture = join(__dirname, '..', 'fixtures', 'console-output-child.ts');
+    const result = await runChild(fixture, [configPath, 'opt-out']);
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    // 正则说明：\r? 兼容 Windows 可选回车符，\n 匹配换行符，确保控制台只产生一条 JSON 事件。
+    const consoleLines = result.stdout.split(/\r?\n/).filter(Boolean);
+    assert.equal(consoleLines.length, 1);
+    const fileName = readdirSync(logDirectory).find((name) => !name.endsWith('.json') && !name.includes('-audit'));
+    assert.ok(fileName);
+    const fileLines = readFileSync(join(logDirectory, fileName), 'utf8').split(/\r?\n/).filter(Boolean);
+    assert.equal(fileLines.length, 1);
+
+    const events = [consoleLines[0]!, fileLines[0]!].map((line) => JSON.parse(line) as MaskingOptOutEvent);
+    for (const event of events) {
+        assert.equal(event.name, 'console');
+        assert.equal(event.message, 'message password=message-secret');
+        assert.equal(event.meta.password, 'console-secret');
+        assert.equal(event.meta.token, '********');
+        assert.equal(event.meta.statusCode, 201);
+    }
 });
 
 test('each Plain transport follows its own pattern without appending log position', async () => {

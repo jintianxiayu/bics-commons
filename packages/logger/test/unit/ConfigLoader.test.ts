@@ -128,6 +128,27 @@ processErrors:
         assert.equal(database.file.pattern, '%{message}|root-file');
         assert.equal(config.loggers.has('Database'), false);
     });
+
+    test('accepts field opt-out and preserves string templates from YAML', () => {
+        const directory = temporaryDirectory();
+        const configPath = writeConfig(
+            directory,
+            `
+masking:
+  fields:
+    password: false
+    literalFalse: 'false'
+    account: '***{last4}'
+`
+        );
+
+        const config = new ConfigLoader({ cwd: directory }).load(configPath);
+
+        assert.equal(config.masking.fields.password, false);
+        assert.equal(config.masking.fields.literalFalse, 'false');
+        assert.equal(config.masking.fields.account, '***{last4}');
+        assert.ok(Object.isFrozen(config.masking.fields));
+    });
 });
 
 describe('ConfigLoader validation', () => {
@@ -167,6 +188,7 @@ describe('ConfigLoader validation', () => {
             "root:\n  console:\n    pattern: '%{unknown}'",
             "masking:\n  fields:\n    secret: '{middle2}'",
             "masking:\n  fields:\n    Token: 'x'\n    token: 'y'",
+            "masking:\n  fields:\n    Password: false\n    password: 'masked'",
             'loggers:\n  app:\n    masking:\n      enabled: false',
         ];
 
@@ -179,6 +201,23 @@ describe('ConfigLoader validation', () => {
                         cwd: directory,
                     }).load(),
                 LoggerConfigError
+            );
+        }
+    });
+
+    test('rejects unsupported masking field policy values', () => {
+        const directory = temporaryDirectory();
+        const invalidValues = ['true', 'null', '123', '{}', '[]'];
+
+        for (const value of invalidValues) {
+            const configPath = writeConfig(directory, `masking:\n  fields:\n    password: ${value}`);
+            assert.throws(
+                () =>
+                    new ConfigLoader({
+                        env: { LOGGER_CONFIG_PATH: configPath },
+                        cwd: directory,
+                    }).load(),
+                /masking\.fields\.password must be a string template or false/
             );
         }
     });

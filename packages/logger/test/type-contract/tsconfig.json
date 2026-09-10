@@ -1,0 +1,12 @@
+{
+    "extends": "../../../../tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "skipLibCheck": false,
+        "paths": {
+            "@jintianxiayu/logger": ["../../dist/index.d.ts"]
+        },
+        "types": ["node"]
+    },
+    "include": ["contract.ts"]
+}
