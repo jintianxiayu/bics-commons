@@ -22,3 +22,7 @@
   dir: packages/logger
   intents:
     - gentle-heads-look
+"@jintianxiayu/logger@1.0.1":
+  dir: packages/logger
+  intents:
+    - whole-pears-leave
