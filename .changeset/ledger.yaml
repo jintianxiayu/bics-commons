@@ -26,3 +26,7 @@
   dir: packages/logger
   intents:
     - whole-pears-leave
+"@jintianxiayu/logger@1.1.0":
+  dir: packages/logger
+  intents:
+    - crisp-zebras-exist

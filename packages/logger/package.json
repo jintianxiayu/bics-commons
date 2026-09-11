@@ -1,6 +1,6 @@
 {
     "name": "@jintianxiayu/logger",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "A Winston-based named logger factory with YAML configuration, masking and async trace context.",
     "license": "MIT",
     "type": "commonjs",
