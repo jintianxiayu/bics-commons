@@ -160,11 +160,12 @@ init(config 对象或 configPath) > LOGGER_CONFIG_PATH > 空配置对象
 选中的配置文档
     -> 覆盖内置默认配置的 root
     -> 指定名称的 logger 覆盖
+    -> 校验全部 profiles 并按 LOGGER_PROFILE 覆盖命名 logger level
     -> 生成不可变 EffectiveLoggerProfile
 ```
 
-- `init(config)` 直接把对象交给 schema 校验和规范化流程，不读取配置文件或 `LOGGER_CONFIG_PATH`。
-- `init(configPath)` 只读取该路径，不读取 `LOGGER_CONFIG_PATH`。
+- `init(config)` 直接把对象交给 schema 校验和规范化流程，不读取配置文件或 `LOGGER_CONFIG_PATH`；仍读取 `LOGGER_PROFILE` 选择对象内声明的策略。
+- `init(configPath)` 只读取该路径，不读取 `LOGGER_CONFIG_PATH`；仍读取 `LOGGER_PROFILE` 选择该文件内声明的策略。
 - `init()` 未传参数时才读取 `LOGGER_CONFIG_PATH`；环境变量也未设置时使用空配置文档，从而得到内置默认配置。
 - 选中的路径为空、文件不存在、不可读、YAML 非法，或对象/文件字段非法时，都同步抛出 `LoggerConfigError`，不回退到下一来源。
 - 显式路径、环境变量路径和配置中的相对 `file.dirname` 均以 `process.cwd()` 为基准。
@@ -174,10 +175,21 @@ init(config 对象或 configPath) > LOGGER_CONFIG_PATH > 空配置对象
 
 ### 6.2 概念数据结构
 
+公共 `LoggerConfig` 新增可选 `profiles?: Record<string, LoggerLevelProfile>`；包根导出 `LoggerLevelProfile`
+（可选 `loggers?: Record<string, LoggerLevelOverride>`）和 `LoggerLevelOverride`（必填 `level: LogLevelName`）。
+K 分别为 Profile 名称及完整日志器名称，V 分别为 Profile 内容及级别覆盖。运行时不保留未选中策略。
+
+ConfigLoader 的所有来源共用解析出口。基础配置及所有 Profile 必须先通过校验，合法覆盖不掩盖基础错误。
+选择器只在 undefined 时禁用；名称精确匹配且不能有首尾空白，不读取 NODE_ENV。未知选择器同步抛出 LoggerConfigError。
+Profile 独有 logger 继承 root，既有 logger 保留输出与安全字段，仅替换 level；使用新对象并冻结，输入对象不变。
+该步骤在 Winston 资源创建前完成，失败可修正重试；首次成功后不再读取选择器或文件。配置示例见 README 的多环境级别 Profile。
+旧包不接受 profiles，需先升级消费者再启用新文档；回滚旧包须恢复旧格式文件并清除选择器。
+
 ```typescript
 interface LoggerConfig {
     root?: Partial<LoggerOptions>;
     loggers?: Record<string, Partial<LoggerOptions>>;
+    profiles?: Record<string, LoggerLevelProfile>;
     masking?: Partial<SensitiveMaskingConfig>;
     processErrors?: Partial<ProcessErrorConfig>;
 }

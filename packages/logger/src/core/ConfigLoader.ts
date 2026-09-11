@@ -33,7 +33,9 @@ export interface ConfigLoaderOptions {
     readonly cwd?: string;
 }
 
-const TOP_LEVEL_KEYS = new Set(['root', 'loggers', 'masking', 'processErrors']);
+const TOP_LEVEL_KEYS = new Set(['root', 'loggers', 'masking', 'processErrors', 'profiles']);
+const LEVEL_PROFILE_KEYS = new Set(['loggers']);
+const LEVEL_OVERRIDE_KEYS = new Set(['level']);
 const LOGGER_KEYS = new Set(['level', 'captureLogPosition', 'console', 'file']);
 const CONSOLE_KEYS = new Set(['enabled', 'colors', 'format', 'pattern']);
 const FILE_KEYS = new Set([
@@ -415,13 +417,16 @@ function parseProcessErrors(value: unknown): EffectiveProcessErrorConfig {
 
 /**
  * 校验并归一化整份配置文档，建立根日志器与命名日志器的最终继承关系。
+ * 先完成基础继承与全局约束校验，再验证所有级别策略并应用选中项；
+ * 新名称继承 root，既有名称仅替换 level，最终快照在输出资源创建前冻结。
  *
  * @param value YAML 或配置对象解析得到的文档。
  * @param cwd 相对路径的解析基准。
+ * @param selectedProfile 本次初始化选择的策略名称；未设置时使用基础配置。
  * @returns 日志运行时使用的只读配置快照。
  * @throws {LoggerConfigError} 当文档结构、字段或输出组合无效时抛出。
  */
-function parseDocument(value: unknown, cwd: string): NormalizedLoggerConfig {
+function parseDocument(value: unknown, cwd: string, selectedProfile?: string): NormalizedLoggerConfig {
     const document = requireRecord(value, 'config');
     assertKnownKeys(document, TOP_LEVEL_KEYS, 'config');
 
@@ -456,7 +461,75 @@ function parseDocument(value: unknown, cwd: string): NormalizedLoggerConfig {
         throw new LoggerConfigError('processErrors requires at least one enabled root transport');
     }
 
+    const profiles = parseLevelProfiles(document.profiles);
+    if (selectedProfile !== undefined) {
+        validateProfileName(selectedProfile, 'LOGGER_PROFILE');
+        const overrides = profiles.get(selectedProfile);
+        if (overrides === undefined) {
+            throw new LoggerConfigError(`LOGGER_PROFILE not found: ${JSON.stringify(selectedProfile)}`);
+        }
+        for (const [name, level] of overrides) {
+            loggers.set(name, mergeProfile(loggers.get(name) ?? root, { level }, cwd));
+        }
+    }
     return Object.freeze({ root, loggers, masking, processErrors });
+}
+
+/**
+ * 精确匹配部署选择器和配置名称，防止空白导致静默选择错误策略。
+ * @param name 外部配置名称。
+ * @param fieldPath 配置字段路径。
+ * @returns 无返回值。
+ * @throws {LoggerConfigError} 当名称为空或包含首尾空白时抛出。
+ */
+function validateProfileName(name: string, fieldPath: string): void {
+    if (name.length === 0 || name.trim() !== name) {
+        throw new LoggerConfigError(`${fieldPath} must be non-empty and trimmed: ${JSON.stringify(name)}`);
+    }
+}
+
+/**
+ * 解析单个策略，只接受级别覆盖以维持输出与安全配置边界。
+ * @param value 未校验的策略配置。
+ * @param fieldPath 策略所在路径。
+ * @returns K 为完整日志器名称、V 为合法级别的映射。
+ * @throws {LoggerConfigError} 当结构、字段、名称或级别非法时抛出。
+ */
+function parseLevelProfile(value: unknown, fieldPath: string): Map<string, LogLevelName> {
+    const profile = requireRecord(value, fieldPath);
+    assertKnownKeys(profile, LEVEL_PROFILE_KEYS, fieldPath);
+    const entries = profile.loggers === undefined ? {} : requireRecord(profile.loggers, `${fieldPath}.loggers`);
+    /** K 为完整日志器名称，V 为该策略覆盖的级别。 */
+    const overrides = new Map<string, LogLevelName>();
+    for (const [name, entry] of Object.entries(entries)) {
+        const path = `${fieldPath}.loggers.${name}`;
+        validateProfileName(name, path);
+        const override = requireRecord(entry, path);
+        assertKnownKeys(override, LEVEL_OVERRIDE_KEYS, path);
+        const level = parseLevel(override.level, `${path}.level`);
+        if (level === undefined) {
+            throw new LoggerConfigError(`${path}.level is required`);
+        }
+        overrides.set(name, level);
+    }
+    return overrides;
+}
+
+/**
+ * 验证全部策略，避免未选中的环境错误延迟到部署时才暴露。
+ * @param value 可选的策略映射。
+ * @returns K 为 Profile 名称、V 为命名日志器级别映射的配置。
+ * @throws {LoggerConfigError} 当任一策略非法时抛出。
+ */
+function parseLevelProfiles(value: unknown): Map<string, Map<string, LogLevelName>> {
+    const entries = value === undefined ? {} : requireRecord(value, 'profiles');
+    /** K 为 Profile 名称，V 为日志器名称到级别的映射。 */
+    const profiles = new Map<string, Map<string, LogLevelName>>();
+    for (const [name, profile] of Object.entries(entries)) {
+        validateProfileName(name, `profiles.${name}`);
+        profiles.set(name, parseLevelProfile(profile, `profiles.${name}`));
+    }
+    return profiles;
 }
 
 /** 将用户配置校验并归一化为只读快照，避免无效配置进入日志写入和传输阶段。 */
@@ -485,14 +558,24 @@ export class ConfigLoader {
      * @throws {LoggerConfigError} 当路径、YAML 内容或配置字段无效时抛出。
      */
     load(source?: string | LoggerConfig): NormalizedLoggerConfig {
+        return parseDocument(this.readSource(source), this.cwd, this.env.LOGGER_PROFILE);
+    }
+
+    /**
+     * 只选择一个配置来源，所有来源随后共用 Profile 校验和合并入口。
+     * @param source 显式对象或 YAML 路径。
+     * @returns 尚未校验的配置文档。
+     * @throws {LoggerConfigError} 当来源无法读取或 YAML 非法时抛出。
+     */
+    private readSource(source?: string | LoggerConfig): unknown {
         // 显式配置必须优先且失败即报错，避免悄然回退到环境变量或默认值后掩盖部署错误。
         if (source !== undefined && typeof source !== 'string') {
-            return parseDocument(source, this.cwd);
+            return source;
         }
 
         const configuredPath = source ?? this.env.LOGGER_CONFIG_PATH;
         if (configuredPath === undefined) {
-            return parseDocument({}, this.cwd);
+            return {};
         }
         if (configuredPath.trim().length === 0) {
             const sourceName = source === undefined ? 'LOGGER_CONFIG_PATH' : 'Logger configuration path';
@@ -520,6 +603,6 @@ export class ConfigLoader {
         if (document === null || document === undefined) {
             throw new LoggerConfigError(`Logger configuration must be a YAML mapping: ${resolvedPath}`);
         }
-        return parseDocument(document, this.cwd);
+        return document;
     }
 }

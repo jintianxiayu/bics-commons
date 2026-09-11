@@ -48,11 +48,24 @@ export interface ProcessErrorConfig {
     exitOnError?: boolean;
 }
 
+/** 环境策略只调整输出级别，避免改变输出目标和安全策略。 */
+export interface LoggerLevelOverride {
+    level: LogLevelName;
+}
+
+/** 应用启动时可选择的一组命名日志器级别策略。 */
+export interface LoggerLevelProfile {
+    /** K 为完整日志器名称，V 为必填级别的覆盖配置。 */
+    loggers?: Record<string, LoggerLevelOverride>;
+}
+
 /** 日志库初始化入口接受的完整配置，用于统一根策略、命名覆盖、脱敏与进程错误处理。 */
 export interface LoggerConfig {
     root?: LoggerOptions;
     /** 命名日志器映射中 K 为业务日志器名称，V 为该日志器覆盖根策略的局部配置。 */
     loggers?: Record<string, LoggerOptions>;
+    /** K 为 Profile 名称，V 为通过 LOGGER_PROFILE 选择的级别策略。 */
+    profiles?: Record<string, LoggerLevelProfile>;
     masking?: SensitiveMaskingConfig;
     processErrors?: ProcessErrorConfig;
 }

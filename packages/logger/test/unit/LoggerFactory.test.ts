@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { ConfigLoader } from '../../src/core/ConfigLoader';
 import { LoggerFactory, LoggerFactoryRuntime } from '../../src/core/LoggerFactory';
 import { LoggerConfigError, LoggerLifecycleError } from '../../src/core/errors';
@@ -30,6 +32,64 @@ afterEach(() => {
     while (temporaryDirectories.length > 0) {
         removeTempDirectory(temporaryDirectories.pop()!);
     }
+});
+
+test('P13 P14 P15: profile failure is atomic, retry succeeds and the snapshot stays stable', async () => {
+    const directory = createTempDirectory('logger-profile-lifecycle-');
+    temporaryDirectories.push(directory);
+    const logDirectory = join(directory, 'logs');
+    const configPath = writeConfig(
+        directory,
+        `
+root:
+  level: info
+  console:
+    enabled: false
+  file:
+    enabled: true
+    format: json
+    dirname: ./logs
+    filename: lifecycle.log
+profiles:
+  dev:
+    loggers:
+      orders: { level: debug }
+      later: { level: debug }
+  prod: {}
+processErrors:
+  uncaughtException: false
+  unhandledRejection: false
+  exitOnError: false
+`
+    );
+    const env = { LOGGER_CONFIG_PATH: configPath, LOGGER_PROFILE: 'missing' };
+    const factory = new LoggerFactoryRuntime({ configLoader: new ConfigLoader({ cwd: directory, env }) });
+    try {
+        assert.throws(() => factory.init(), LoggerConfigError);
+        assert.throws(() => factory.getLogger('orders'), LoggerConfigError);
+        assert.equal(existsSync(logDirectory), false);
+        env.LOGGER_PROFILE = 'dev';
+        const orders = factory.getLogger('orders');
+        env.LOGGER_PROFILE = 'prod';
+        writeConfig(directory, 'invalid: [');
+        factory.init();
+        assert.equal(factory.getLogger('orders'), orders);
+        orders.debug('cached');
+        factory.getLogger('later').debug('new');
+        factory.getLogger('other').debug('filtered');
+    } finally {
+        await factory.shutdown();
+    }
+    const filename = readdirSync(logDirectory).find((name) => name.endsWith('.log'));
+    assert.ok(filename);
+    const events = readFileSync(join(logDirectory, filename), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { message: string });
+    assert.deepEqual(
+        events.map((event) => event.message),
+        ['cached', 'new']
+    );
 });
 
 describe('LoggerFactoryRuntime', () => {

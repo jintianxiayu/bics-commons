@@ -95,19 +95,61 @@ LoggerFactory.init('./config/logger.yaml');
 首次成功初始化后，后续 `init()` 调用保持幂等，不会重新读取或切换配置。未显式调用 `init()` 时，
 第一次 `getLogger()` 会按相同规则延迟初始化。
 
+### 多环境级别 Profile
+
+在同一份 `logger.yaml` 中定义环境差异：
+
+```yaml
+root:
+    level: info
+profiles:
+    dev:
+        loggers:
+            orders:
+                level: debug
+    qa:
+        loggers:
+            orders:
+                level: debug
+    prod:
+        loggers:
+            orders:
+                level: info
+```
+
+在启动进程前设置 `LOGGER_CONFIG_PATH` 为该文件路径，并设置 `LOGGER_PROFILE=dev`、`qa` 或 `prod`。
+应用照常调用 `LoggerFactory.init()` 和 `LoggerFactory.getLogger('orders')`：dev/qa 输出 debug，prod 从 info 开始输出。
+
+配置来源仍按上节选择；选定文档后，`LOGGER_PROFILE` 选择该文档内的策略，包括显式传给 `init()` 的对象或路径。
+合并顺序为内置 root、基础 root、基础命名 logger、所选 Profile 的命名 logger level。
+Profile 中新声明的 logger 继承基础 root 的其他字段，未匹配的 logger 及 root 保持原策略。
+
+- `profiles` 可选，类型为 `Record<string, LoggerLevelProfile>`。每个 Profile 仅允许可选 `loggers` 映射；
+  每个覆盖项为 `LoggerLevelOverride`，仅含必填 `level: 'debug' | 'info' | 'warn' | 'error'`。
+- 名称区分大小写、非空且不能含首尾空白；logger 名称按完整字符串匹配，支持 `@jintianxiayu/cache-decorator`，不支持通配符。
+- 不设置 `LOGGER_PROFILE` 时使用基础配置，不根据 `NODE_ENV` 自动选择。空字符串、首尾空白、未知 Profile 均导致初始化失败。
+- 空 Profile（如 `prod: {}`）表示沿用基础配置；覆盖项 `{ orders: {} }` 因缺少 level 而非法。
+- 全部 Profile 都会校验，包括未选中的策略。未知字段、重复 YAML 键或非法级别会导致初始化失败；不支持在 Profile 中配置 root、输出或脱敏等其他字段。
+- 配置只在首次成功初始化时固化；修改文件、环境变量或再次调用 `init()` 不会热更新。首次 `getLogger()` 的延迟初始化遵循相同规则。
+
+应在任何依赖首次获取 logger 前提供配置；依赖可能在导入时获取 logger，因此建议在进程启动环境中提供上述变量。
+先升级所有读取此文件的消费者，再启用 `profiles`：旧版会拒绝该新字段。回滚旧版时恢复旧格式配置并清除 `LOGGER_PROFILE`；
+仅在新版停用 Profile 时，清除该变量即可恢复基础策略。
+
 ### 配置项说明
 
-所有配置项都是可选的。`root` 在内置默认值上合并，`loggers.<name>` 再深度继承合并后的 `root`，只覆盖
+以下基础配置项都是可选的（Profile 覆盖项的 level 必填）。`root` 在内置默认值上合并，`loggers.<name>` 再深度继承合并后的 `root`，只覆盖
 自己显式声明的字段。
 
 #### 顶层配置
 
-| 配置项          | 类型                            | 默认值              | 说明                                                              |
-| --------------- | ------------------------------- | ------------------- | ----------------------------------------------------------------- |
-| `root`          | `LoggerOptions`                 | 内置根配置          | 定义所有日志器共享的级别、调用位置和输出方式                      |
-| `loggers`       | `Record<string, LoggerOptions>` | `{}`                | 按名称覆盖 `root`；名称必须非空且不含首尾空白，并且区分大小写     |
-| `masking`       | `SensitiveMaskingConfig`        | 启用内置策略        | 定义应用于所有日志器和输出通道的元数据脱敏规则                    |
-| `processErrors` | 配置对象                        | 三个开关均为 `true` | 控制 Winston 对未捕获异常、未处理拒绝和进程退出的处理；字段见下表 |
+| 配置项          | 类型                                 | 默认值              | 说明                                                              |
+| --------------- | ------------------------------------ | ------------------- | ----------------------------------------------------------------- |
+| `root`          | `LoggerOptions`                      | 内置根配置          | 定义所有日志器共享的级别、调用位置和输出方式                      |
+| `profiles`      | `Record<string, LoggerLevelProfile>` | `{}`                | 通过 LOGGER_PROFILE 选择的命名日志器级别策略                      |
+| `loggers`       | `Record<string, LoggerOptions>`      | `{}`                | 按名称覆盖 `root`；名称必须非空且不含首尾空白，并且区分大小写     |
+| `masking`       | `SensitiveMaskingConfig`             | 启用内置策略        | 定义应用于所有日志器和输出通道的元数据脱敏规则                    |
+| `processErrors` | 配置对象                             | 三个开关均为 `true` | 控制 Winston 对未捕获异常、未处理拒绝和进程退出的处理；字段见下表 |
 
 `getLogger()` 会移除传入名称的首尾空白，并为同一个规范化名称返回同一实例。例如 `database` 与
 `database` 返回同一个日志器，而 `Database` 是另一个名称。
@@ -340,7 +382,7 @@ interface LoggerInterface {
 ```
 
 公开类型还包括 `ConsoleConfig`、`FileConfig`、`LoggerConfig`、`LoggerInterface`、`LoggerOptions`、
-`LogLevelName`、`SensitiveFieldConfig`、`SensitiveMaskingConfig` 和 `ShutdownOptions`。内部加载器、格式器、
+`LoggerLevelOverride`、`LoggerLevelProfile`、`LogLevelName`、`SensitiveFieldConfig`、`SensitiveMaskingConfig` 和 `ShutdownOptions`。内部加载器、格式器、
 传输工厂和生命周期错误类不属于包根公共 API，请勿从 `dist/` 子路径导入。
 
 ## 常见问题

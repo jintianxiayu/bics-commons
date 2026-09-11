@@ -1,4 +1,9 @@
-import { type LoggerConfig, type SensitiveFieldConfig } from '@jintianxiayu/logger';
+import {
+    type LoggerConfig,
+    type LoggerLevelOverride,
+    type LoggerLevelProfile,
+    type SensitiveFieldConfig,
+} from '@jintianxiayu/logger';
 
 type Equal<Left, Right> =
     (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2 ? true : false;
@@ -42,3 +47,28 @@ void loggerConfig;
 void invalidTrue;
 void invalidNull;
 void invalidNumber;
+
+// P16–P17：从包根声明验证新增 Profile 契约及精确负例。
+const override: LoggerLevelOverride = { level: 'debug' };
+const profile: LoggerLevelProfile = { loggers: { orders: override } };
+const profileConfig: LoggerConfig = { profiles: { dev: profile, prod: {} } };
+// @ts-expect-error 覆盖项的 level 必填。
+const missingLevel: LoggerLevelOverride = {};
+const invalidLevel: LoggerLevelOverride = {
+    // @ts-expect-error 级别沿用既有四种名称。
+    level: 'verbose',
+};
+const extraOutput: LoggerLevelOverride = {
+    level: 'info',
+    // @ts-expect-error Profile 不提供输出配置。
+    console: { enabled: true },
+};
+const extraRoot: LoggerLevelProfile = {
+    // @ts-expect-error Profile 不覆盖 root。
+    root: { level: 'debug' },
+};
+void profileConfig;
+void missingLevel;
+void invalidLevel;
+void extraOutput;
+void extraRoot;

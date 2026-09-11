@@ -5,6 +5,8 @@ export type {
     FileConfig,
     LoggerConfig,
     LoggerInterface,
+    LoggerLevelOverride,
+    LoggerLevelProfile,
     LoggerOptions,
     LogLevelName,
     SensitiveFieldConfig,
