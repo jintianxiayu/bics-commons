@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import type { HttpMethod, MethodMetadata } from '../core/method-metadata';
+import type { HttpMethodOptions } from '../core/http-method-options';
 
 const METHOD_METADATA_KEY = Symbol.for('bics:http-client:method');
 
@@ -9,15 +10,11 @@ const METHOD_METADATA_KEY = Symbol.for('bics:http-client:method');
  * @param method - HTTP 方法类型
  * @returns 方法装饰器工厂函数
  */
-function createMethodDecorator(method: HttpMethod) {
-    return function (path: string) {
-        return function (
-            target: object,
-            propertyKey: string | symbol,
-
-            _descriptor: PropertyDescriptor
-        ): void {
-            const metadata: MethodMetadata = { method, path };
+function createMethodDecorator(method: HttpMethod): (path: string, options?: HttpMethodOptions) => MethodDecorator {
+    return function (path: string, options?: HttpMethodOptions): MethodDecorator {
+        return function (target: object, propertyKey: string | symbol, _descriptor: PropertyDescriptor): void {
+            const metadata: MethodMetadata =
+                options === undefined ? { method, path } : { method, path, options: { ...options } };
             Reflect.defineMetadata(METHOD_METADATA_KEY, metadata, target, propertyKey);
         };
     };

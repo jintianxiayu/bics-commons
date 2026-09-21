@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import axios from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { LoggerContext } from '@jintianxiayu/logger';
 import { HttpClient, Get, executeMiddlewareChain, type HttpContext, type Middleware } from '../src';
 import { createTracingMiddleware } from '../src/middlewares/tracing';
@@ -58,6 +58,7 @@ describe('集成测试：内置 middleware + 用户自定义 middleware 执行�
             order.push('user:after');
         };
         mockedAxios.mockReset();
+        jest.mocked(mockedAxios.create).mockReturnValue(mockedAxios as unknown as AxiosInstance);
         mockedAxios.mockImplementation(async () => {
             order.push('send');
             return { status: 200, headers: {}, data: null } as never;

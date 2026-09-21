@@ -18,6 +18,7 @@ export { Path, Query, Body, Header, getParamMetadata } from './decorators/params
 
 // 类型定义
 export type { HttpClientConfig, TracingOptions, DebugOptions } from './core/http-client-config';
+export type { HttpMethodOptions } from './core/http-method-options';
 export type { HttpContext } from './core/middleware';
 export type { Middleware } from './core/middleware';
 export type { MethodMetadata, HttpMethod } from './core/method-metadata';

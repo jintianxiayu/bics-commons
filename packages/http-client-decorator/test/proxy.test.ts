@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import axios from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { HttpClient, Get, Post, Path, Query, Body, Header } from '../src';
 
 jest.mock('axios');
@@ -9,6 +9,7 @@ const mockedAxios = jest.mocked(axios);
 describe('代理方法拦截', () => {
     beforeEach(() => {
         mockedAxios.mockReset();
+        jest.mocked(mockedAxios.create).mockReturnValue(mockedAxios as unknown as AxiosInstance);
         mockedAxios.mockResolvedValue({ status: 200, data: { id: 'remote' }, headers: {} } as never);
     });
 
@@ -53,13 +54,16 @@ describe('代理方法拦截', () => {
         const result = await new UserService().updateUser('123', 'true', 'Bearer token', body);
 
         expect(result).toEqual({ id: 'remote' });
-        expect(mockedAxios).toHaveBeenCalledWith({
-            method: 'POST',
-            url: 'https://api.example.com/users/123?expand=true',
-            headers: { 'x-client': 'test', authorization: 'Bearer token' },
-            data: body,
-            timeout: undefined,
-            validateStatus: expect.any(Function),
-        });
+        expect(mockedAxios).toHaveBeenCalledWith(
+            expect.objectContaining({
+                method: 'POST',
+                url: 'https://api.example.com/users/123?expand=true',
+                headers: { 'x-client': 'test', authorization: 'Bearer token' },
+                data: body,
+                timeout: undefined,
+                validateStatus: expect.any(Function),
+                'axios-retry': { retries: 0 },
+            })
+        );
     });
 });

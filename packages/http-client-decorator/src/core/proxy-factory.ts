@@ -3,7 +3,7 @@ import type { MethodMetadata } from './method-metadata';
 import { getMethodMetadata } from '../decorators/http-methods';
 import { getParamMetadata } from '../decorators/params';
 import type { HttpClientConfig, TracingOptions, DebugOptions } from './http-client-config';
-import { createHttpRequest } from './http-client';
+import { createHttpRequest, type HttpRequestSender } from './http-client';
 import { executeMiddlewareChain, type HttpContext, type Middleware } from './middleware';
 import { createTracingMiddleware } from '../middlewares/tracing';
 import { createDebugMiddleware } from '../middlewares/debug';
@@ -18,15 +18,30 @@ import { createDebugMiddleware } from '../middlewares/debug';
  * @returns 代理包装后的实例
  */
 export function createProxyInstance<T extends object>(target: T, config: HttpClientConfig): T {
+    const httpClient = createHttpRequest(config);
     return new Proxy(target, {
         get(_targetProxy, prop, receiver) {
             const methodMeta = getMethodMetadata(target, prop);
             if (methodMeta) {
-                return createHttpMethod(target, prop as string, methodMeta, config);
+                return createHttpMethod({
+                    instanceTarget: target,
+                    propertyKey: prop as string,
+                    methodMeta,
+                    config,
+                    httpClient,
+                });
             }
             return Reflect.get(target, prop, receiver);
         },
     });
+}
+
+interface HttpMethodContext {
+    instanceTarget: object;
+    propertyKey: string;
+    methodMeta: MethodMetadata;
+    config: HttpClientConfig;
+    httpClient: HttpRequestSender;
 }
 
 /**
@@ -40,20 +55,14 @@ export function createProxyInstance<T extends object>(target: T, config: HttpCli
  * @param config - HTTP 客户端配置
  * @returns 异步方法函数
  */
-function createHttpMethod(
-    instanceTarget: object,
-    propertyKey: string,
-    methodMeta: MethodMetadata,
-    config: HttpClientConfig
-): (...args: unknown[]) => Promise<unknown> {
+function createHttpMethod(context: HttpMethodContext): (...args: unknown[]) => Promise<unknown> {
+    const { instanceTarget, propertyKey, methodMeta, config, httpClient } = context;
     return async function (...args: unknown[]): Promise<unknown> {
         const paramMeta = getParamMetadata(instanceTarget, propertyKey);
         const { url, body, headers } = buildRequestParts(paramMeta, args, methodMeta, config);
 
         const builtinMiddlewares: Middleware[] = buildBuiltinMiddlewares(config);
         const middlewares: Middleware[] = [...builtinMiddlewares, ...(config.middlewares ?? [])];
-        const httpClient = createHttpRequest(config);
-
         const ctx: HttpContext = {
             request: {
                 method: methodMeta.method,
@@ -65,7 +74,7 @@ function createHttpMethod(
         };
 
         const handler = async (): Promise<void> => {
-            const result = await httpClient(ctx.request);
+            const result = await httpClient(ctx.request, methodMeta.options?.retry);
             ctx.response = result;
         };
 

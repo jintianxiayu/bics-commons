@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import axios from 'axios';
+import axios, { AxiosError, type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { HttpClient, Get, Post, Put, Delete, Path, Query, Body, HttpError } from '../src';
 
 jest.mock('axios');
@@ -7,12 +7,25 @@ jest.mock('axios');
 const mockedAxios = jest.mocked(axios);
 
 function mockResponse(status: number, data: unknown): void {
-    mockedAxios.mockResolvedValue({ status, data, headers: {} } as never);
+    mockedAxios.mockImplementation(async (config: AxiosRequestConfig) => {
+        const response = { status, data, headers: {}, config } as AxiosResponse;
+        if (config.validateStatus?.(status) === false) {
+            const error = new AxiosError();
+            Object.assign(error, {
+                message: `Request failed with status code ${status}`,
+                config,
+                response,
+            });
+            throw error;
+        }
+        return response;
+    });
 }
 
 describe('集成测试：完整 HTTP 请求流程', () => {
     beforeEach(() => {
         mockedAxios.mockReset();
+        jest.mocked(mockedAxios.create).mockReturnValue(mockedAxios as unknown as AxiosInstance);
     });
 
     it('should throw HttpError on 404', async () => {

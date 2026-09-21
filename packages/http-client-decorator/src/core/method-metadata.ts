@@ -1,3 +1,5 @@
+import type { HttpMethodOptions } from './http-method-options';
+
 /**
  * HTTP 方法类型定义
  */
@@ -10,8 +12,10 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
  *
  * @param method - HTTP 方法类型
  * @param path - 请求路径
+ * @param options - 方法级可选配置
  */
 export interface MethodMetadata {
     method: HttpMethod;
     path: string;
+    options?: HttpMethodOptions;
 }

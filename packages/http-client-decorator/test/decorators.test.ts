@@ -93,6 +93,49 @@ describe('装饰器元数据存储和读取', () => {
             const meta = getMethodMetadata(TestService.prototype, 'patchUser');
             expect(meta).toEqual({ method: 'PATCH', path: '/users/:id' });
         });
+
+        it('stores method retry options without adding runtime state', () => {
+            const retryCondition = jest.fn(() => true);
+            const onRetry = jest.fn();
+
+            class TestService {
+                @Get('/users', { retry: { retries: 2, retryCondition, onRetry } })
+                getUsers() {}
+            }
+
+            const meta = getMethodMetadata(TestService.prototype, 'getUsers');
+            expect(meta).toEqual({
+                method: 'GET',
+                path: '/users',
+                options: { retry: { retries: 2, retryCondition, onRetry } },
+            });
+            expect(meta?.options?.retry).not.toHaveProperty('retryCount');
+            expect(meta?.options?.retry).not.toHaveProperty('lastRequestTime');
+            expect(retryCondition).not.toHaveBeenCalled();
+            expect(onRetry).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            ['GET', Get],
+            ['POST', Post],
+            ['PUT', Put],
+            ['DELETE', Delete],
+            ['PATCH', Patch],
+        ] as const)('supports options for %s without executing callbacks', (method, decorator) => {
+            const onMaxRetryTimesExceeded = jest.fn();
+
+            class TestService {
+                @decorator('/resource', { retry: { retries: 0, onMaxRetryTimesExceeded } })
+                request() {}
+            }
+
+            expect(getMethodMetadata(TestService.prototype, 'request')).toEqual({
+                method,
+                path: '/resource',
+                options: { retry: { retries: 0, onMaxRetryTimesExceeded } },
+            });
+            expect(onMaxRetryTimesExceeded).not.toHaveBeenCalled();
+        });
     });
 
     describe('@Path/@Query/@Body/@Header', () => {
